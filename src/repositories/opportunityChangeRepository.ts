@@ -51,6 +51,11 @@ export class OpportunityChangeRepository {
         )
         OR EXISTS (
           SELECT 1
+          FROM opportunity_reminders reminder
+          WHERE reminder.organization_id = ? AND reminder.opportunity_id = e.opportunity_id
+        )
+        OR EXISTS (
+          SELECT 1
           FROM opportunity_feedback f
           WHERE f.organization_id = ? AND f.opportunity_id = e.opportunity_id AND f.status = 'FAVORITED'
         )
@@ -71,6 +76,11 @@ export class OpportunityChangeRepository {
             SELECT 1
             FROM organization_opportunities oo
             WHERE oo.organization_id = ? AND oo.opportunity_id = e.opportunity_id
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM opportunity_reminders reminder
+            WHERE reminder.organization_id = ? AND reminder.opportunity_id = e.opportunity_id
           )
           OR EXISTS (
             SELECT 1
@@ -114,6 +124,7 @@ export class OpportunityChangeRepository {
       organizationId,
       organizationId,
       organizationId,
+      organizationId,
       opportunityId ?? null,
       opportunityId ?? null,
       unreadOnly ? 1 : 0,
@@ -123,7 +134,7 @@ export class OpportunityChangeRepository {
 
   markRead(organizationId: number, id: number): boolean {
     const now = new Date().toISOString();
-    return this.markReadStatement.run(organizationId, now, now, id, organizationId, organizationId).changes > 0;
+    return this.markReadStatement.run(organizationId, now, now, id, organizationId, organizationId, organizationId).changes > 0;
   }
 
   private findByUnique(opportunityId: number, type: OpportunityChangeType, fingerprint: string): OpportunityChangeEvent | undefined {

@@ -215,4 +215,58 @@ describe('persistência de agenda operacional', () => {
       { id: event.id, readAt: null },
     ]);
   });
+
+  it('mantém evento visível e leitura independente para organização vinculada só por lembrete', () => {
+    const db = createTestDatabase();
+    const organizations = new OrganizationRepository(db);
+    const first = organizations.create('Empresa Reminder A');
+    const second = organizations.create('Empresa Reminder B');
+    const opportunityId = createOpportunity(db, 'agenda-6');
+    const reminders = new OpportunityReminderRepository(db);
+    const changeRepository = new OpportunityChangeRepository(db);
+
+    reminders.create({
+      organizationId: first.id,
+      opportunityId,
+      type: 'BID_DEADLINE',
+      title: 'Prazo oficial',
+      dueAt: '2026-09-09T18:00:00.000Z',
+      status: 'PENDING',
+      note: null,
+      createdByUserId: null,
+    });
+    reminders.create({
+      organizationId: second.id,
+      opportunityId,
+      type: 'DOCUMENT_REVIEW',
+      title: 'Ler edital',
+      dueAt: '2026-09-08T15:00:00.000Z',
+      status: 'PENDING',
+      note: null,
+      createdByUserId: null,
+    });
+
+    const { event } = changeRepository.record({
+      opportunityId,
+      sourceCode: 'PNCP',
+      type: 'DOCUMENT_UPDATED',
+      fingerprint: 'doc:anexo-1',
+      summary: 'Anexo atualizado',
+      payload: { file: 'anexo-1.pdf' },
+      detectedAt: '2026-09-01T15:00:00.000Z',
+    });
+
+    expect(changeRepository.listForOrganization(first.id, opportunityId, true)).toMatchObject([
+      { id: event.id, readAt: null },
+    ]);
+    expect(changeRepository.listForOrganization(second.id, opportunityId, true)).toMatchObject([
+      { id: event.id, readAt: null },
+    ]);
+
+    expect(changeRepository.markRead(first.id, event.id)).toBe(true);
+    expect(changeRepository.listForOrganization(first.id, opportunityId, true)).toHaveLength(0);
+    expect(changeRepository.listForOrganization(second.id, opportunityId, true)).toMatchObject([
+      { id: event.id, readAt: null },
+    ]);
+  });
 });

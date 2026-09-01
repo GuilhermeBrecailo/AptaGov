@@ -20,6 +20,14 @@ WHERE e.read_at IS NOT NULL;
 INSERT OR IGNORE INTO opportunity_change_event_reads (
   opportunity_change_event_id, organization_id, read_at, created_at
 )
+SELECT e.id, reminder.organization_id, e.read_at, e.created_at
+FROM opportunity_change_events e
+INNER JOIN opportunity_reminders reminder ON reminder.opportunity_id = e.opportunity_id
+WHERE e.read_at IS NOT NULL;
+
+INSERT OR IGNORE INTO opportunity_change_event_reads (
+  opportunity_change_event_id, organization_id, read_at, created_at
+)
 SELECT e.id, f.organization_id, e.read_at, e.created_at
 FROM opportunity_change_events e
 INNER JOIN opportunity_feedback f ON f.opportunity_id = e.opportunity_id
