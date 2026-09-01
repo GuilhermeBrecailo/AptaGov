@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementação concluída localmente no workspace atual com TDD, testes focados verdes e `typecheck` verde.
+Implementação concluída localmente no workspace atual com TDD, testes focados verdes e `typecheck` verde, com rechecagem fresca realizada em 2026-09-01.
 
 ## Arquivos alterados
 
@@ -78,6 +78,30 @@ Saída final:
 * Types generated in .nuxt.
 ```
 
+### 4. Rechecagem de status
+
+Comandos:
+
+```text
+rtk npm --prefix 'C:\Users\user\Documents\dev\licitacoes-pncp' test -- --run tests/unit/agenda-persistence.test.ts
+rtk npm --prefix 'C:\Users\user\Documents\dev\licitacoes-pncp' run typecheck
+```
+
+Saídas:
+
+```text
+> vitest run --run tests/unit/agenda-persistence.test.ts
+RUN  v3.2.7 C:/Users/user/Documents/dev/licitacoes-pncp
+✓ tests/unit/agenda-persistence.test.ts (3 tests) 35ms
+Test Files  1 passed (1)
+Tests  3 passed (3)
+```
+
+```text
+> nuxt prepare && tsc --noEmit
+* Types generated in .nuxt.
+```
+
 ## Self-review
 
 - O teste cobre os quatro pontos pedidos no brief: unicidade de lembrete, transições de conclusão/pulo, isolamento entre organizações e deduplicação de eventos de mudança.
@@ -88,6 +112,7 @@ Saída final:
 ## Commit SHA(s)
 
 - `caccdc6` - `feat: persist operational calendar events`
+- `720d0e4` - `docs: record task 1 report`
 
 ## Preocupações
 
