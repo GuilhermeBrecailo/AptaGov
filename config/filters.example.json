@@ -1,0 +1,16 @@
+{
+  "lookbackDays": "{{LOOKBACK_DAYS}}",
+  "states": ["{{UF}}"],
+  "citiesIbge": ["{{CITY_IBGE_CODE}}"],
+  "modalities": ["{{MODALITY_CODE}}"],
+  "keywords": ["{{INCLUDE_KEYWORD}}"],
+  "excludedKeywords": ["{{EXCLUDE_KEYWORD}}"],
+  "minimumScore": "{{MINIMUM_SCORE}}",
+  "estimatedValueMinCents": "{{MIN_VALUE_CENTS}}",
+  "scoreWeights": {
+    "keyword": "{{KEYWORD_WEIGHT}}",
+    "region": "{{REGION_WEIGHT}}",
+    "value": "{{VALUE_WEIGHT}}",
+    "deadline": "{{DEADLINE_WEIGHT}}"
+  }
+}

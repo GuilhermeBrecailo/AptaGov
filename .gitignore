@@ -1,0 +1,14 @@
+node_modules/
+.nuxt/
+.output/
+.env
+.env.*
+!.env.example
+config/filters.json
+*.db
+*.db-shm
+*.db-wal
+data/
+backups/
+coverage/
+.DS_Store

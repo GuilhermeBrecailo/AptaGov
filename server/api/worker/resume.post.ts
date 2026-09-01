@@ -1,0 +1,10 @@
+import { createError, defineEventHandler } from 'h3';
+import { isOrganizationOwner } from '../../../src/auth/authorization';
+import { getRuntime, requireAuth } from '../../utils/app';
+
+export default defineEventHandler((event) => {
+  const context = requireAuth(event);
+  if (!isOrganizationOwner(context)) throw createError({ statusCode: 403, statusMessage: 'Somente o proprietÃ¡rio pode retomar o worker' });
+  getRuntime().systemState.resume();
+  return getRuntime().systemState.status();
+});

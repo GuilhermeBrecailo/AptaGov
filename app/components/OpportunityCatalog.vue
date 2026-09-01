@@ -1,0 +1,44 @@
+<script setup lang="ts">
+import type { CatalogOpportunity } from '../types';
+
+defineProps<{ items: CatalogOpportunity[]; loading: boolean }>();
+const emit = defineEmits<{ select: [item: CatalogOpportunity]; add: [item: CatalogOpportunity] }>();
+
+function money(cents: number) {
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(cents / 100);
+}
+
+function date(value: string | null) {
+  return value ? new Intl.DateTimeFormat('pt-BR').format(new Date(value)) : 'Sem prazo informado';
+}
+
+function sourceLabel(source: CatalogOpportunity['source']) {
+  return source === 'OPEN_DATA' ? 'Dados Abertos' : 'PNCP';
+}
+</script>
+
+<template>
+  <div class="catalog-list" :class="{ 'is-loading': loading }">
+    <div v-if="!items.length && !loading" class="empty-state">
+      <span class="empty-icon">⌕</span>
+      <strong>Nenhuma licitação encontrada</strong>
+      <p>Tente mudar a busca ou reduzir o score mínimo.</p>
+    </div>
+    <article v-for="item in items" :key="item.id" class="opportunity-row" @click="emit('select', item)">
+      <div class="row-main">
+        <div class="row-badges"><span class="score-badge">{{ item.score }}/100</span><span class="source-badge">{{ sourceLabel(item.source) }}</span></div>
+        <h3>{{ item.title }}</h3>
+        <p>{{ item.organization }} <span>·</span> {{ item.state }}{{ item.city ? ` · ${item.city}` : '' }}</p>
+      </div>
+      <div class="row-meta">
+        <span><small>Prazo</small>{{ date(item.biddingDeadline) }}</span>
+        <span v-if="item.estimatedValueCents"><small>Valor estimado</small>{{ money(item.estimatedValueCents) }}</span>
+      </div>
+      <div class="row-actions" @click.stop>
+        <button v-if="!item.inKanban" class="btn btn-primary btn-small" @click="emit('add', item)">Adicionar ao kanban</button>
+        <span v-else class="saved-label">No kanban</span>
+        <button class="icon-button" aria-label="Ver detalhes" title="Ver detalhes" @click="emit('select', item)">→</button>
+      </div>
+    </article>
+  </div>
+</template>
