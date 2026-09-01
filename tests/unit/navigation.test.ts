@@ -8,14 +8,16 @@ describe('navegação autenticada do SaaS', () => {
   const home = readFileSync('app/pages/index.vue', 'utf8');
   const admin = readFileSync('app/pages/admin.vue', 'utf8');
 
-  it('oferece hambúrguer, Painel, Configuração e Plano', () => {
-    expect(drawer).toContain('aria-label="Abrir menu"');
-    expect(drawer).toContain('Painel');
-    expect(drawer).toContain('Configuração');
-    expect(drawer).toContain('Plano');
-    expect(drawer).toContain('to="/configuracao"');
-    expect(drawer).toContain('to="/plano"');
-  });
+it('oferece hambúrguer, Painel, Agenda, Configuração e Plano', () => {
+  expect(drawer).toContain('aria-label="Abrir menu"');
+  expect(drawer).toContain('Painel');
+  expect(drawer).toContain('Agenda');
+  expect(drawer).toContain('Configuração');
+  expect(drawer).toContain('Plano');
+  expect(drawer).toContain('to="/agenda"');
+  expect(drawer).toContain('to="/configuracao"');
+  expect(drawer).toContain('to="/plano"');
+});
 
   it('exibe Dashboard somente para o administrador da plataforma', () => {
     expect(drawer).toContain('v-if="auth?.isPlatformAdmin"');

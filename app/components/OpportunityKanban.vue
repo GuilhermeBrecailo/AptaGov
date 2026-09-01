@@ -1,9 +1,22 @@
 <script setup lang="ts">
-import type { CatalogOpportunity, KanbanState } from '../types';
+import OpportunityChecklist from './OpportunityChecklist.vue';
+import type { CatalogOpportunity, ChecklistItem, ChecklistPatchInput, KanbanState } from '../types';
 import { kanbanColumns } from '../types';
 
-defineProps<{ items: CatalogOpportunity[]; loading: boolean }>();
-const emit = defineEmits<{ select: [item: CatalogOpportunity]; changeState: [item: CatalogOpportunity, state: KanbanState] }>();
+defineProps<{
+  items: CatalogOpportunity[];
+  loading: boolean;
+  checklists?: Record<number, ChecklistItem[]>;
+  checklistLoadingIds?: number[];
+  checklistSavingIds?: number[];
+  currentUser?: { id: number; name: string } | null;
+}>();
+const emit = defineEmits<{
+  select: [item: CatalogOpportunity];
+  changeState: [item: CatalogOpportunity, state: KanbanState];
+  checklistComplete: [payload: { opportunityId: number; itemId: number }];
+  checklistSave: [payload: { opportunityId: number; itemId: number; patch: ChecklistPatchInput }];
+}>();
 
 const transitions: Record<KanbanState, KanbanState[]> = {
   NEW: ['QUALIFIED', 'DISCARDED'],
@@ -34,6 +47,17 @@ function actionLabel(state: KanbanState) {
         <h4>{{ item.title }}</h4>
         <p>{{ item.organization }}</p>
         <div class="card-footer"><span>{{ item.state }}</span><button class="icon-button small" aria-label="Ver detalhes" @click.stop="emit('select', item)">↗</button></div>
+        <div class="kanban-preparation" @click.stop>
+          <OpportunityChecklist
+            compact
+            :items="checklists?.[item.id] ?? []"
+            :loading="checklistLoadingIds?.includes(item.id)"
+            :saving="Boolean(checklistSavingIds?.length)"
+            :current-user="currentUser"
+            @quick-complete="emit('checklistComplete', { opportunityId: item.id, itemId: $event })"
+            @save-item="emit('checklistSave', { opportunityId: item.id, itemId: $event.id, patch: $event.patch })"
+          />
+        </div>
         <div v-if="transitions[item.kanbanState].length" class="card-transitions" @click.stop>
           <button v-for="next in transitions[item.kanbanState]" :key="next" class="text-action" @click="emit('changeState', item, next)">{{ actionLabel(next) }}</button>
         </div>

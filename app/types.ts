@@ -1,8 +1,20 @@
 export type KanbanState = 'NEW' | 'QUALIFIED' | 'CONTACTED' | 'IN_PROGRESS' | 'WON' | 'LOST' | 'DISCARDED';
+export type OpportunitySource = 'PNCP' | 'OPEN_DATA';
+export type ReminderType = 'BID_DEADLINE' | 'DOCUMENT_REVIEW' | 'FOLLOW_UP' | 'MEETING';
+export type ReminderStatus = 'PENDING' | 'COMPLETED' | 'SKIPPED';
+export type OpportunityChangeType =
+  | 'PROPOSAL_DEADLINE'
+  | 'SESSION_OPENING'
+  | 'DISPUTE_START'
+  | 'CLOSING_RESULT'
+  | 'SOURCE_UPDATE';
+export type ChecklistStatus = 'OPEN' | 'COMPLETED' | 'SKIPPED';
+export type ChecklistCategory = 'DOCUMENTS' | 'COMMERCIAL' | 'PROPOSAL' | 'SESSION' | 'REVIEW';
+export type AgendaVisualType = 'BID_DEADLINE' | 'MEETING' | 'DISPUTE' | 'RESULT' | 'MANUAL' | 'SOURCE_UPDATE';
 
 export interface CatalogOpportunity {
   id: number;
-  source: 'PNCP' | 'OPEN_DATA';
+  source: OpportunitySource;
   title: string;
   description: string;
   organization: string;
@@ -106,6 +118,99 @@ export interface AuthPayload {
   organization: { id: number; name: string; slug: string };
   role: 'OWNER' | 'MEMBER';
   isPlatformAdmin?: boolean;
+}
+
+export interface OrganizationAlertPreferences {
+  organizationId: number;
+  proposalDeadline: boolean;
+  sessionOpening: boolean;
+  disputeStart: boolean;
+  changeAlerts: boolean;
+}
+
+export interface OpportunityReminder {
+  id: number;
+  organizationId: number;
+  opportunityId: number;
+  type: ReminderType;
+  title: string;
+  dueAt: string;
+  status: ReminderStatus;
+  note: string | null;
+  createdByUserId: number | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OpportunityChangeEvent {
+  id: number;
+  opportunityId: number;
+  sourceCode: OpportunitySource;
+  type: OpportunityChangeType;
+  fingerprint: string;
+  summary: string;
+  payload: Record<string, unknown>;
+  detectedAt: string;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export interface ChecklistItem {
+  id: number;
+  organizationId: number;
+  opportunityId: number;
+  templateKey: string | null;
+  title: string;
+  category: ChecklistCategory;
+  status: ChecklistStatus;
+  assigneeUserId: number | null;
+  dueAt: string | null;
+  note: string | null;
+  position: number;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChecklistPatchInput {
+  title?: string;
+  status?: ChecklistStatus;
+  assigneeUserId?: number | null;
+  dueAt?: string | null;
+  note?: string | null;
+}
+
+export interface AgendaReminderDraft {
+  id?: number;
+  opportunityId: number | null;
+  type: ReminderType;
+  title: string;
+  dueAt: string;
+  note: string;
+}
+
+export interface AgendaEntryView {
+  id: string;
+  opportunityId: number;
+  reminderId?: number;
+  reminderType?: ReminderType;
+  changeId?: number;
+  kind: 'REMINDER' | 'CHANGE';
+  visualType: AgendaVisualType;
+  title: string;
+  subtitle: string;
+  occurredAt: string;
+  sourceLabel: string;
+  sourceUrl: string;
+  opportunityTitle: string;
+  statusBucket: 'OPEN' | 'COMPLETED';
+  statusLabel: string;
+  note: string | null;
+  canEdit: boolean;
+  canComplete: boolean;
+  canSkip: boolean;
+  readAt?: string | null;
 }
 
 export interface PlatformAdminMetrics {

@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { watch } from 'vue';
+import { useRoute } from 'vue-router';
 import OpportunityCatalog from '../components/OpportunityCatalog.vue';
 import OpportunityDetails from '../components/OpportunityDetails.vue';
 import OpportunityKanban from '../components/OpportunityKanban.vue';
-import type { AuthPayload, CatalogOpportunity, CatalogPage, FilterConfig, KanbanState, SavedSearch, SyncSettings } from '../types';
+import type { AuthPayload, CatalogOpportunity, CatalogPage, ChecklistItem, ChecklistPatchInput, FilterConfig, KanbanState, SavedSearch, SyncSettings } from '../types';
 
 const {
   isOnline,
@@ -12,6 +14,7 @@ const {
 } = usePwa();
 const { data: auth, error: authError } = await useFetch<AuthPayload>('/api/auth/me');
 if (authError.value) await navigateTo('/login');
+const route = useRoute();
 
 const { data: filters } = await useFetch<FilterConfig>('/api/filters');
 const { data: radarPayload } = await useFetch<{ data: SavedSearch[]; limit: number | null }>('/api/radars', {
@@ -21,7 +24,7 @@ const { data: status, refresh: refreshStatus } = await useFetch<{ pause: { pause
   default: () => ({ pause: { paused: false, reason: null }, opportunities: 0, automaticSync: { enabled: true, intervalMinutes: 10 } }),
 });
 
-const activeView = ref<'catalog' | 'kanban'>('catalog');
+const activeView = ref<'catalog' | 'kanban'>(route.query.opportunity ? 'kanban' : 'catalog');
 const searchInput = ref('');
 const searchTerm = ref('');
 const stateInput = ref('');
@@ -34,6 +37,9 @@ const busy = ref(false);
 const message = ref('');
 const states = ['', 'SP', 'RJ', 'MG', 'PR', 'SC', 'RS', 'GO', 'BA', 'DF'];
 const selectedRadar = computed(() => radarPayload.value?.data.find((radar) => radar.id === selectedRadarId.value));
+const checklistByOpportunity = ref<Record<number, ChecklistItem[]>>({});
+const checklistLoadingIds = ref<number[]>([]);
+const checklistSavingIds = ref<number[]>([]);
 
 const query = computed(() => ({
   q: searchTerm.value || undefined,
@@ -46,6 +52,7 @@ const query = computed(() => ({
   page: page.value,
   pageSize: activeView.value === 'kanban' ? 50 : 20,
   kanbanOnly: activeView.value === 'kanban',
+  opportunity: route.query.opportunity,
 }));
 const { data: catalog, pending: catalogLoading, refresh: refreshCatalog } = await useFetch<CatalogPage>('/api/opportunities', {
   query,
@@ -54,6 +61,21 @@ const { data: catalog, pending: catalogLoading, refresh: refreshCatalog } = awai
 
 const items = computed(() => catalog.value?.data ?? []);
 const averageScore = computed(() => Math.round(items.value.reduce((sum, item) => sum + item.score, 0) / Math.max(1, items.value.length)));
+
+watch([items, () => route.query.opportunity], ([currentItems, opportunity]) => {
+  const opportunityId = Number(opportunity);
+  if (!Number.isInteger(opportunityId)) return;
+  selected.value = currentItems.find((item) => item.id === opportunityId) ?? selected.value;
+}, { immediate: true });
+
+watch([items, activeView], ([currentItems, view]) => {
+  if (view !== 'kanban') return;
+  void Promise.all(currentItems.map((item) => loadChecklist(item.id)));
+}, { immediate: true });
+
+watch(selected, (item) => {
+  if (item?.inKanban) void loadChecklist(item.id);
+});
 
 async function applySearch() {
   searchTerm.value = searchInput.value.trim();
@@ -76,6 +98,7 @@ async function addToKanban(item: CatalogOpportunity) {
   await $fetch(`/api/opportunities/${item.id}/kanban`, { method: 'POST' });
   message.value = 'Licitação adicionada ao seu kanban.';
   await refreshCatalog();
+  await loadChecklist(item.id, true);
 }
 
 async function updateFeedback(item: CatalogOpportunity, status: 'FAVORITED' | 'NOT_RELEVANT' | null) {
@@ -89,6 +112,41 @@ async function changeState(item: CatalogOpportunity, state: KanbanState) {
   await $fetch(`/api/opportunities/${item.id}/state`, { method: 'PATCH', body: { state } });
   message.value = 'Etapa atualizada.';
   await refreshCatalog();
+}
+
+async function loadChecklist(opportunityId: number, force = false) {
+  if (!force && checklistByOpportunity.value[opportunityId]) return;
+  if (checklistLoadingIds.value.includes(opportunityId)) return;
+  checklistLoadingIds.value = [...checklistLoadingIds.value, opportunityId];
+  try {
+    const checklist = await $fetch<ChecklistItem[]>(`/api/opportunities/${opportunityId}/checklist`);
+    checklistByOpportunity.value = { ...checklistByOpportunity.value, [opportunityId]: checklist };
+  } finally {
+    checklistLoadingIds.value = checklistLoadingIds.value.filter((id) => id !== opportunityId);
+  }
+}
+
+async function completeChecklistItem(opportunityId: number, itemId: number) {
+  await saveChecklistItem(opportunityId, itemId, { status: 'COMPLETED' });
+}
+
+async function saveChecklistItem(opportunityId: number, itemId: number, patch: ChecklistPatchInput) {
+  if (checklistSavingIds.value.includes(itemId)) return;
+  checklistSavingIds.value = [...checklistSavingIds.value, itemId];
+  try {
+    const updated = await $fetch<ChecklistItem>(`/api/opportunities/${opportunityId}/checklist/${itemId}`, {
+      method: 'PATCH',
+      body: patch,
+    });
+    const current = checklistByOpportunity.value[opportunityId] ?? [];
+    checklistByOpportunity.value = {
+      ...checklistByOpportunity.value,
+      [opportunityId]: current.map((item) => item.id === itemId ? updated : item),
+    };
+    message.value = patch.status === 'COMPLETED' ? 'Item de preparação concluído.' : 'Item de preparação atualizado.';
+  } finally {
+    checklistSavingIds.value = checklistSavingIds.value.filter((id) => id !== itemId);
+  }
 }
 
 async function syncNow() {
@@ -156,8 +214,8 @@ async function logout() {
         </section>
       </div>
 
-      <section v-else class="kanban-surface"><div class="list-heading"><div><span class="section-kicker">Pipeline da empresa</span><h2>Do interesse à decisão</h2></div><button class="btn btn-ghost" @click="selectView('catalog')">+ Buscar licitações</button></div><OpportunityKanban :items="items" :loading="catalogLoading" @select="selected = $event" @change-state="changeState" /></section>
+      <section v-else class="kanban-surface"><div class="list-heading"><div><span class="section-kicker">Pipeline da empresa</span><h2>Do interesse à decisão</h2></div><button class="btn btn-ghost" @click="selectView('catalog')">+ Buscar licitações</button></div><OpportunityKanban :items="items" :loading="catalogLoading" :checklists="checklistByOpportunity" :checklist-loading-ids="checklistLoadingIds" :checklist-saving-ids="checklistSavingIds" :current-user="auth?.user ?? null" @select="selected = $event" @change-state="changeState" @checklist-complete="completeChecklistItem($event.opportunityId, $event.itemId)" @checklist-save="saveChecklistItem($event.opportunityId, $event.itemId, $event.patch)" /></section>
     </main>
-    <OpportunityDetails :item="selected" @close="selected = null" @feedback="updateFeedback(selected!, $event)" />
+    <OpportunityDetails :item="selected" :checklist-items="selected ? checklistByOpportunity[selected.id] ?? [] : []" :checklist-loading="selected ? checklistLoadingIds.includes(selected.id) : false" :checklist-saving="checklistSavingIds.length > 0" :current-user="auth?.user ?? null" @close="selected = null" @feedback="updateFeedback(selected!, $event)" @checklist-complete="selected && completeChecklistItem(selected.id, $event)" @checklist-save="(itemId, patch) => selected && saveChecklistItem(selected.id, itemId, patch)" />
   </div>
 </template>
