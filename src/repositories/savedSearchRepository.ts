@@ -8,6 +8,7 @@ export interface SavedSearch {
   name: string;
   filters: FilterConfig;
   enabled: boolean;
+  notificationsEnabled: boolean;
   lastRunAt: string | null;
   lastMatchAt: string | null;
   createdAt: string;
@@ -43,14 +44,14 @@ export class SavedSearchRepository {
     return row ? mapRow(row) : undefined;
   }
 
-  create(organizationId: number, name: string, filters: FilterConfig): SavedSearch {
+  create(organizationId: number, name: string, filters: FilterConfig, notificationsEnabled = true): SavedSearch {
     const normalizedName = normalizeName(name);
     const validFilters = filterConfigSchema.parse(filters);
     const now = new Date().toISOString();
     const result = this.db.prepare(`
-      INSERT INTO saved_searches (organization_id, name, filters_json, enabled, created_at, updated_at)
-      VALUES (?, ?, ?, 1, ?, ?)
-    `).run(organizationId, normalizedName, JSON.stringify(validFilters), now, now);
+      INSERT INTO saved_searches (organization_id, name, filters_json, enabled, notifications_enabled, created_at, updated_at)
+      VALUES (?, ?, ?, 1, ?, ?, ?)
+    `).run(organizationId, normalizedName, JSON.stringify(validFilters), notificationsEnabled ? 1 : 0, now, now);
     return this.find(organizationId, Number(result.lastInsertRowid)) as SavedSearch;
   }
 
@@ -61,29 +62,34 @@ export class SavedSearchRepository {
     const validFilters = filterConfigSchema.parse(filters);
     const now = new Date().toISOString();
     this.db.prepare(`
-      INSERT INTO saved_searches (organization_id, name, filters_json, enabled, created_at, updated_at)
-      VALUES (?, ?, ?, 1, ?, ?)
+      INSERT INTO saved_searches (organization_id, name, filters_json, enabled, notifications_enabled, created_at, updated_at)
+      VALUES (?, ?, ?, 1, 1, ?, ?)
       ON CONFLICT(organization_id, name) DO NOTHING
     `).run(organizationId, name, JSON.stringify(validFilters), now, now);
     return this.findByName(organizationId, name) as SavedSearch;
   }
 
-  update(organizationId: number, id: number, changes: { name?: string; filters?: FilterConfig; enabled?: boolean }): SavedSearch | undefined {
+  update(organizationId: number, id: number, changes: { name?: string; filters?: FilterConfig; enabled?: boolean; notificationsEnabled?: boolean }): SavedSearch | undefined {
     const current = this.find(organizationId, id);
     if (!current) return undefined;
     const name = changes.name === undefined ? current.name : normalizeName(changes.name);
     const filters = changes.filters === undefined ? current.filters : filterConfigSchema.parse(changes.filters);
     const enabled = changes.enabled === undefined ? current.enabled : changes.enabled;
+    const notificationsEnabled = changes.notificationsEnabled === undefined ? current.notificationsEnabled : changes.notificationsEnabled;
     this.db.prepare(`
       UPDATE saved_searches
-      SET name = ?, filters_json = ?, enabled = ?, updated_at = ?
+      SET name = ?, filters_json = ?, enabled = ?, notifications_enabled = ?, updated_at = ?
       WHERE organization_id = ? AND id = ?
-    `).run(name, JSON.stringify(filters), enabled ? 1 : 0, new Date().toISOString(), organizationId, id);
+    `).run(name, JSON.stringify(filters), enabled ? 1 : 0, notificationsEnabled ? 1 : 0, new Date().toISOString(), organizationId, id);
     return this.find(organizationId, id);
   }
 
   setEnabled(organizationId: number, id: number, enabled: boolean): SavedSearch | undefined {
     return this.update(organizationId, id, { enabled });
+  }
+
+  setNotificationsEnabled(organizationId: number, id: number, notificationsEnabled: boolean): SavedSearch | undefined {
+    return this.update(organizationId, id, { notificationsEnabled });
   }
 
   remove(organizationId: number, id: number): boolean {
@@ -102,6 +108,7 @@ type SavedSearchRow = {
   name: string;
   filters_json: string;
   enabled: number;
+  notifications_enabled: number;
   last_run_at: string | null;
   last_match_at: string | null;
   created_at: string;
@@ -115,6 +122,7 @@ function mapRow(row: SavedSearchRow): SavedSearch {
     name: row.name,
     filters: filterConfigSchema.parse(JSON.parse(row.filters_json)),
     enabled: row.enabled === 1,
+    notificationsEnabled: row.notifications_enabled !== 0,
     lastRunAt: row.last_run_at,
     lastMatchAt: row.last_match_at,
     createdAt: row.created_at,

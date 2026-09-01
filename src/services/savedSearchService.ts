@@ -11,6 +11,10 @@ export function selectRadarsForRun<T extends { id: number; enabled: boolean }>(r
   return mode === 'automatic' ? radars.filter((radar) => radar.enabled) : radars;
 }
 
+export function selectRadarsForNotifications<T extends { id: number; enabled: boolean; notificationsEnabled?: boolean }>(radars: T[], mode: SyncMode, radarId?: number): T[] {
+  return selectRadarsForRun(radars, mode, radarId).filter((radar) => radar.notificationsEnabled !== false);
+}
+
 export class SavedSearchService {
   private readonly repository: SavedSearchRepository;
   private readonly billing: BillingService;
@@ -41,15 +45,15 @@ export class SavedSearchService {
     return this.repository.find(organizationId, id);
   }
 
-  create(organizationId: number, name: string, filters: FilterConfig): SavedSearch {
+  create(organizationId: number, name: string, filters: FilterConfig, notificationsEnabled = true): SavedSearch {
     const maxRadars = this.limit(organizationId);
     if (maxRadars !== null && this.repository.count(organizationId) >= maxRadars) {
       throw new Error(`Seu plano atingiu o limite de ${maxRadars} radares`);
     }
-    return this.repository.create(organizationId, name, filters);
+    return this.repository.create(organizationId, name, filters, notificationsEnabled);
   }
 
-  update(organizationId: number, id: number, changes: { name?: string; filters?: FilterConfig; enabled?: boolean }): SavedSearch | undefined {
+  update(organizationId: number, id: number, changes: { name?: string; filters?: FilterConfig; enabled?: boolean; notificationsEnabled?: boolean }): SavedSearch | undefined {
     return this.repository.update(organizationId, id, changes);
   }
 

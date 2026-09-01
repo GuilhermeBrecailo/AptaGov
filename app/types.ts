@@ -64,6 +64,7 @@ export interface SavedSearch {
   name: string;
   filters: FilterConfig;
   enabled: boolean;
+  notificationsEnabled: boolean;
   lastRunAt: string | null;
   lastMatchAt: string | null;
   createdAt: string;

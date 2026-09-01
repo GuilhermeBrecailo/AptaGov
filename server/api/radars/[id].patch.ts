@@ -5,8 +5,8 @@ import { getSavedSearchService, requireActiveBilling } from '../../utils/app';
 export default defineEventHandler(async (event) => {
   const context = requireActiveBilling(event, 'catalog');
   const id = parseId(getRouterParam(event, 'id'));
-  const body = await readBody<{ name?: unknown; filters?: unknown; enabled?: unknown }>(event);
-  const changes: { name?: string; filters?: ReturnType<typeof filterConfigSchema.parse>; enabled?: boolean } = {};
+  const body = await readBody<{ name?: unknown; filters?: unknown; enabled?: unknown; notificationsEnabled?: unknown }>(event);
+  const changes: { name?: string; filters?: ReturnType<typeof filterConfigSchema.parse>; enabled?: boolean; notificationsEnabled?: boolean } = {};
   if (body.name !== undefined) {
     if (typeof body.name !== 'string') throw createError({ statusCode: 400, statusMessage: 'Nome de radar inválido' });
     changes.name = body.name;
@@ -19,6 +19,10 @@ export default defineEventHandler(async (event) => {
   if (body.enabled !== undefined) {
     if (typeof body.enabled !== 'boolean') throw createError({ statusCode: 400, statusMessage: 'Status do radar inválido' });
     changes.enabled = body.enabled;
+  }
+  if (body.notificationsEnabled !== undefined) {
+    if (typeof body.notificationsEnabled !== 'boolean') throw createError({ statusCode: 400, statusMessage: 'A preferência de notificações do radar é inválida' });
+    changes.notificationsEnabled = body.notificationsEnabled;
   }
   try {
     const radar = getSavedSearchService().update(context.organization.id, id, changes);

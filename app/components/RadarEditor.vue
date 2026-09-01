@@ -2,9 +2,10 @@
 import type { FilterConfig, SavedSearch } from '../types';
 
 const props = defineProps<{ radar: SavedSearch | null; filters: FilterConfig }>();
-const emit = defineEmits<{ save: [payload: { id?: number; name: string; filters: FilterConfig; enabled: boolean }]; close: [] }>();
+const emit = defineEmits<{ save: [payload: { id?: number; name: string; filters: FilterConfig; enabled: boolean; notificationsEnabled: boolean }]; close: [] }>();
 const name = ref(props.radar?.name ?? '');
 const enabled = ref(props.radar?.enabled ?? true);
+const notificationsEnabled = ref(props.radar?.notificationsEnabled ?? true);
 const localFilters = ref<FilterConfig>(cloneFilters(props.radar?.filters ?? props.filters));
 
 type ListFilterKey = 'keywords' | 'excludedKeywords' | 'states' | 'citiesIbge' | 'modalities';
@@ -21,7 +22,13 @@ function updateList(key: ListFilterKey, event: Event): void {
 }
 
 function save(): void {
-  emit('save', { id: props.radar?.id, name: name.value, filters: localFilters.value, enabled: enabled.value });
+  emit('save', {
+    id: props.radar?.id,
+    name: name.value,
+    filters: localFilters.value,
+    enabled: enabled.value,
+    notificationsEnabled: notificationsEnabled.value,
+  });
 }
 
 function cloneFilters(value: FilterConfig): FilterConfig {
@@ -34,7 +41,8 @@ function cloneFilters(value: FilterConfig): FilterConfig {
     <div class="list-heading"><div><span class="section-kicker">{{ radar ? 'Editar radar' : 'Novo radar' }}</span><h2>{{ radar ? radar.name : 'Uma busca para cada estratégia' }}</h2></div><button class="close-inline" type="button" aria-label="Fechar editor" @click="emit('close')">×</button></div>
     <div class="radar-editor-grid">
       <label class="field"><span>Nome do radar</span><input v-model="name" required placeholder="Ex.: Software em São Paulo"></label>
-      <label class="toggle-field radar-editor-toggle"><input v-model="enabled" type="checkbox"><span>Radar ativo</span></label>
+      <label class="toggle-field radar-editor-toggle"><input v-model="enabled" type="checkbox"><span>Buscar automaticamente</span></label>
+      <label class="toggle-field radar-editor-toggle"><input v-model="notificationsEnabled" type="checkbox"><span>Enviar notificações</span></label>
       <label class="field field-wide"><span>Palavras-chave</span><input :value="listValue('keywords')" placeholder="software, suporte, manutenção" @change="updateList('keywords', $event)"></label>
       <label class="field field-wide"><span>Palavras excluídas</span><input :value="listValue('excludedKeywords')" placeholder="obra, combustível" @change="updateList('excludedKeywords', $event)"></label>
       <label class="field"><span>Estados</span><input :value="listValue('states')" placeholder="SP, PR" @change="updateList('states', $event)"></label>

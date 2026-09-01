@@ -51,6 +51,18 @@ describe('radares salvos', () => {
     expect(repository.find(firstOrganization.id, first.id)?.enabled).toBe(false);
   });
 
+  it('mantém a busca ativa quando silencia somente as notificações', () => {
+    const db = createTestDatabase();
+    const organization = new OrganizationRepository(db).create('Empresa Alertas');
+    const repository = new SavedSearchRepository(db);
+    const radar = repository.create(organization.id, 'Radar sem alerta', filters);
+
+    const updated = repository.update(organization.id, radar.id, { notificationsEnabled: false });
+
+    expect(updated).toMatchObject({ enabled: true, notificationsEnabled: false });
+    expect(repository.listEnabled(organization.id)).toHaveLength(1);
+  });
+
   it('marca a execução e o último match do radar', () => {
     const db = createTestDatabase();
     const organization = new OrganizationRepository(db).create('Empresa Execução');

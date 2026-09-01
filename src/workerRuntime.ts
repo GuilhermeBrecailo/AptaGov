@@ -22,7 +22,7 @@ import { OrganizationSyncSettingsRepository } from './repositories/organizationS
 import { shouldRunSync, type SyncMode } from './services/syncPolicy';
 import { SavedSearchRepository } from './repositories/savedSearchRepository';
 import { runSelectedRadars } from './services/radarSyncService';
-import { selectRadarsForRun } from './services/savedSearchService';
+import { selectRadarsForNotifications } from './services/savedSearchService';
 
 export interface WorkerCycleResult {
   paused: boolean;
@@ -124,7 +124,7 @@ export class WorkerRuntime {
       for (const organizationId of notificationOrganizationIds) {
         if (notificationBudget <= 0 || !this.billing.canUse(organizationId, 'notifications')) continue;
         const radars = savedSearches.list(organizationId);
-        const selectedRadars = selectRadarsForRun(radars, mode, options.radarId);
+        const selectedRadars = selectRadarsForNotifications(radars, mode, options.radarId);
         if (radars.length === 0) {
           const currentFilters = organizationFilters.find(organizationId) ?? defaultFilters;
           notificationBudget -= this.notifications.queueRecent(organizationId, cycleStartedAt, currentFilters.minimumScore, notificationBudget);
@@ -142,11 +142,23 @@ export class WorkerRuntime {
         const queued = this.notifications.queueUpcomingDeadlines(organizationId, deadlineFrom, deadlineTo, notificationBudget);
         notificationBudget -= queued;
       }
-      notificationBudget -= this.pushNotifications.queueRecent(
-        cycleStartedAt,
-        notificationBudget,
-        mode === 'automatic' ? { automaticOnly: true } : { organizationId: options.organizationId },
-      );
+      for (const organizationId of notificationOrganizationIds) {
+        if (notificationBudget <= 0 || !this.billing.canUse(organizationId, 'notifications')) continue;
+        const radars = savedSearches.list(organizationId);
+        const selectedRadars = selectRadarsForNotifications(radars, mode, options.radarId);
+        if (radars.length === 0) {
+          notificationBudget -= this.pushNotifications.queueRecent(
+            cycleStartedAt,
+            notificationBudget,
+            { organizationId },
+          );
+          continue;
+        }
+        for (const radar of selectedRadars) {
+          if (notificationBudget <= 0) break;
+          notificationBudget -= this.pushNotifications.queueRecentForRadar(organizationId, radar.filters, cycleStartedAt, notificationBudget);
+        }
+      }
       for (const organizationId of notificationOrganizationIds) {
         if (notificationBudget <= 0 || !this.billing.canUse(organizationId, 'notifications')) continue;
         const queued = this.pushNotifications.queueUpcomingDeadlines(organizationId, deadlineFrom, deadlineTo, notificationBudget);

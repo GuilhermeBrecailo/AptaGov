@@ -88,7 +88,7 @@ function closeRadarEditor() {
   creatingRadar.value = false;
 }
 
-async function saveRadar(payload: { id?: number; name: string; filters: FilterConfig; enabled: boolean }) {
+async function saveRadar(payload: { id?: number; name: string; filters: FilterConfig; enabled: boolean; notificationsEnabled: boolean }) {
   try {
     if (payload.id) await $fetch(`/api/radars/${payload.id}`, { method: 'PATCH', body: payload });
     else await $fetch('/api/radars', { method: 'POST', body: payload });
@@ -103,6 +103,12 @@ async function saveRadar(payload: { id?: number; name: string; filters: FilterCo
 async function toggleRadar(radar: SavedSearch) {
   await $fetch(`/api/radars/${radar.id}`, { method: 'PATCH', body: { enabled: !radar.enabled } });
   message.value = radar.enabled ? 'Radar pausado.' : 'Radar ativado.';
+  await refreshRadars();
+}
+
+async function toggleRadarNotifications(radar: SavedSearch) {
+  await $fetch(`/api/radars/${radar.id}`, { method: 'PATCH', body: { notificationsEnabled: !radar.notificationsEnabled } });
+  message.value = radar.notificationsEnabled ? 'Alertas desse radar pausados.' : 'Alertas desse radar ativados.';
   await refreshRadars();
 }
 
@@ -152,7 +158,7 @@ async function logout() {
 
       <div v-if="filters" class="configuration-layout">
         <section class="content-surface configuration-surface radar-management-surface">
-          <RadarList :radars="radarPayload?.data ?? []" :limit="radarPayload?.limit ?? 3" @create="openRadarEditor()" @edit="openRadarEditor" @toggle="toggleRadar" @remove="removeRadar" />
+          <RadarList :radars="radarPayload?.data ?? []" :limit="radarPayload?.limit ?? 3" @create="openRadarEditor()" @edit="openRadarEditor" @toggle="toggleRadar" @toggle-notifications="toggleRadarNotifications" @remove="removeRadar" />
         </section>
         <RadarEditor v-if="creatingRadar || editingRadar" :radar="editingRadar" :filters="filters" @save="saveRadar" @close="closeRadarEditor" />
         <section class="content-surface configuration-surface">

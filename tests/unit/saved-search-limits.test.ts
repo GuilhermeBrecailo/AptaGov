@@ -3,7 +3,7 @@ import { defaultBillingPlans } from '../../src/config/billingPlans';
 import { createTestDatabase } from '../../src/db/database';
 import { OrganizationRepository } from '../../src/repositories/organizationRepository';
 import { SavedSearchRepository } from '../../src/repositories/savedSearchRepository';
-import { SavedSearchService, selectRadarsForRun } from '../../src/services/savedSearchService';
+import { SavedSearchService, selectRadarsForNotifications, selectRadarsForRun } from '../../src/services/savedSearchService';
 import { runSelectedRadars } from '../../src/services/radarSyncService';
 
 describe('limite de radares por plano', () => {
@@ -30,6 +30,17 @@ describe('limite de radares por plano', () => {
 
     expect(selectRadarsForRun(radars, 'automatic').map((radar) => radar.id)).toEqual([1, 3]);
     expect(selectRadarsForRun(radars, 'manual', 2).map((radar) => radar.id)).toEqual([2]);
+  });
+
+  it('separa a busca automática dos alertas de cada radar', () => {
+    const radars = [
+      { id: 1, enabled: true, notificationsEnabled: true },
+      { id: 2, enabled: true, notificationsEnabled: false },
+      { id: 3, enabled: false, notificationsEnabled: true },
+    ];
+
+    expect(selectRadarsForNotifications(radars, 'automatic').map((radar) => radar.id)).toEqual([1]);
+    expect(selectRadarsForNotifications(radars, 'manual').map((radar) => radar.id)).toEqual([1, 3]);
   });
 
   it('executa os radares selecionados e atualiza a última execução', async () => {

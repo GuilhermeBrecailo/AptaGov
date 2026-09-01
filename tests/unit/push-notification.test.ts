@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { createTestDatabase } from '../../src/db/database';
+import type { FilterConfig } from '../../src/domain/types';
 import { OrganizationRepository } from '../../src/repositories/organizationRepository';
 import { OpportunityRepository } from '../../src/repositories/opportunityRepository';
 import { OrganizationSyncSettingsRepository } from '../../src/repositories/organizationSyncSettingsRepository';
+import { OrganizationFilterRepository } from '../../src/repositories/organizationFilterRepository';
 import { UserRepository } from '../../src/repositories/userRepository';
 import { PushNotificationService, ExpiredPushSubscriptionError, type PushSender } from '../../src/services/pushNotificationService';
 
@@ -76,6 +78,40 @@ describe('notificações no dispositivo', () => {
 
     expect(service.queueRecent('2026-08-31T00:00:00.000Z', Number.POSITIVE_INFINITY, { automaticOnly: true })).toBe(0);
     expect(service.queueRecent('2026-08-31T00:00:00.000Z', Number.POSITIVE_INFINITY, { organizationId: organization.id })).toBe(1);
+  });
+
+  it('enfileira somente oportunidades compatíveis com o radar selecionado', () => {
+    const db = createTestDatabase();
+    const user = new UserRepository(db).create({ name: 'Eva', email: 'eva@push.test', passwordHash: 'hash' });
+    const organization = new OrganizationRepository(db).create('Empresa Radar Push');
+    new OrganizationRepository(db).addMember(organization.id, user.id, 'OWNER');
+    const opportunities = new OpportunityRepository(db);
+    opportunities.insert({
+      pncpId: 'push-radar-software', title: 'Sistema de software', description: 'tecnologia', organization: 'Prefeitura', state: 'SP',
+      sourceUrl: 'https://pncp.gov.br/push-radar-software', publicationDate: '2026-08-31T10:00:00.000Z', estimatedValueCents: 0,
+    });
+    opportunities.insert({
+      pncpId: 'push-radar-obra', title: 'Reforma predial', description: 'obra civil', organization: 'Prefeitura', state: 'SP',
+      sourceUrl: 'https://pncp.gov.br/push-radar-obra', publicationDate: '2026-08-31T10:00:00.000Z', estimatedValueCents: 0,
+    });
+
+    const filters: FilterConfig = {
+      lookbackDays: 7,
+      states: ['SP'],
+      citiesIbge: [],
+      modalities: [],
+      keywords: ['software'],
+      excludedKeywords: [],
+      minimumScore: 50,
+      estimatedValueMinCents: 0,
+      scoreWeights: { keyword: 50, region: 0, value: 0, deadline: 0 },
+    };
+    new OrganizationFilterRepository(db).save(organization.id, { ...filters, minimumScore: 100 });
+    const service = new PushNotificationService(db);
+    service.registerSubscription(user.id, { ...subscription, endpoint: 'https://push.example.test/radar' });
+
+    expect(service.queueRecentForRadar(organization.id, filters, '2026-01-01T00:00:00.000Z')).toBe(1);
+    expect(service.pendingCount()).toBe(1);
   });
 
   it('enfileira alerta de prazo próximo sem colidir com a novidade', () => {

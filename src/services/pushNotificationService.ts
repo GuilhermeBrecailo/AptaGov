@@ -1,10 +1,13 @@
 import type { SqliteDatabase } from '../db/database';
+import type { FilterConfig } from '../domain/types';
+import { OpportunityRepository } from '../repositories/opportunityRepository';
 import {
   PushNotificationRepository,
   type PushSubscriptionInput,
   type PushDelivery,
   type PushQueueOptions,
 } from '../repositories/pushNotificationRepository';
+import { scoreOpportunity } from './scoring/ruleScorer';
 
 export interface PushMessage {
   title: string;
@@ -48,6 +51,29 @@ export class PushNotificationService {
 
   queueRecent(since: string, limit = Number.POSITIVE_INFINITY, options: PushQueueOptions = {}): number {
     return this.push.queueRecent(since, limit, options);
+  }
+
+  queueRecentForRadar(organizationId: number, filters: FilterConfig, since: string, limit = Number.POSITIVE_INFINITY): number {
+    const opportunities = new OpportunityRepository(this.db).listCreatedSince(since, 0, organizationId).filter((opportunity) => {
+      const score = scoreOpportunity({
+        title: opportunity.title,
+        description: opportunity.description,
+        state: opportunity.state,
+        estimatedValueCents: opportunity.estimatedValueCents,
+        deadline: opportunity.biddingDeadline,
+      }, {
+        keywords: filters.keywords,
+        excludedKeywords: filters.excludedKeywords,
+        states: filters.states,
+        estimatedValueMinCents: filters.estimatedValueMinCents,
+        scoreWeights: filters.scoreWeights,
+      });
+      return !score.excluded && score.score >= filters.minimumScore;
+    });
+    return this.queueRecent(since, limit, {
+      organizationId,
+      opportunityIds: opportunities.map((opportunity) => opportunity.id),
+    });
   }
 
   queueUpcomingDeadlines(organizationId: number, from: string, to: string, limit = Number.POSITIVE_INFINITY): number {

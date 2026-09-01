@@ -37,6 +37,7 @@ export interface PushDelivery {
 export interface PushQueueOptions {
   organizationId?: number;
   automaticOnly?: boolean;
+  opportunityIds?: ReadonlyArray<number>;
 }
 
 export class PushNotificationRepository {
@@ -72,6 +73,7 @@ export class PushNotificationRepository {
   }
 
   queueRecent(since: string, limit = Number.POSITIVE_INFINITY, options: PushQueueOptions = {}): number {
+    if (options.opportunityIds?.length === 0) return 0;
     const now = new Date().toISOString();
     const organizationScope = options.organizationId !== undefined
       ? 'AND m.organization_id = ?'
@@ -80,7 +82,15 @@ export class PushNotificationRepository {
         : '';
     const queryParams: Array<string | number> = [since];
     if (options.organizationId !== undefined) queryParams.push(options.organizationId);
-    queryParams.push(now, now, normalizeLimit(limit));
+    queryParams.push(now, now);
+    if (options.opportunityIds) queryParams.push(...options.opportunityIds);
+    queryParams.push(normalizeLimit(limit));
+    const opportunityScope = options.opportunityIds
+      ? `AND o.id IN (${options.opportunityIds.map(() => '?').join(', ')})`
+      : '';
+    const organizationScoreScope = options.opportunityIds
+      ? ''
+      : "AND COALESCE(os.score, o.score) >= COALESCE(json_extract(f.filters_json, '$.minimumScore'), 0)";
     const candidates = this.db.prepare(`
       SELECT DISTINCT ps.id AS subscription_id, o.id AS opportunity_id,
         o.title, o.source_url
@@ -96,13 +106,14 @@ export class PushNotificationRepository {
         LEFT JOIN billing_accounts b ON b.organization_id = m.organization_id
         WHERE m.user_id = ps.user_id
           ${organizationScope}
-          AND COALESCE(os.score, o.score) >= COALESCE(json_extract(f.filters_json, '$.minimumScore'), 0)
+          ${organizationScoreScope}
           AND (
             b.organization_id IS NULL
             OR (b.status = 'ACTIVE' AND (b.current_period_ends_at IS NULL OR b.current_period_ends_at > ?))
             OR (b.status = 'TRIALING' AND b.trial_ends_at > ?)
           )
       )
+      ${opportunityScope}
       AND NOT EXISTS (
         SELECT 1 FROM push_deliveries d
         WHERE d.subscription_id = ps.id AND d.opportunity_id = o.id AND d.event_key = 'new_opportunity'

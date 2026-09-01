@@ -30,7 +30,7 @@ O painel fica em `https://aptagov.site` e o worker continua executando em segund
 - O worker busca o PNCP imediatamente ao iniciar e repete automaticamente a cada `SYNC_INTERVAL_MINUTES` minutos (10 por padrão), com paginação completa e deduplicação por `pncp_id`. Cada empresa pode desligar a busca automática em `Configuração`; nesse caso, a consulta continua disponível pelo botão manual.
 - O score determinístico usa os filtros da organização e pode ser ajustado no painel.
 - A empresa pesquisa e filtra o catálogo, abre detalhes e adiciona apenas o que deseja ao próprio kanban.
-- No primeiro acesso, um onboarding cria o radar inicial; depois a empresa pode manter radares separados por produto, região ou estratégia e pausar cada um.
+- No primeiro acesso, um onboarding cria o radar inicial; depois a empresa pode manter radares separados por produto, região ou estratégia, pausar a busca ou silenciar os alertas de cada um.
 - O catálogo permite selecionar um radar, filtrar prazo aberto, favoritar oportunidades ou removê-las como não relevantes sem afetar outras empresas.
 - Alertas podem ser enviados por e-mail e por notificação nativa do PWA.
 - Além de novidades, o worker pode avisar sobre prazo próximo para oportunidades acompanhadas, sem duplicar o mesmo evento.

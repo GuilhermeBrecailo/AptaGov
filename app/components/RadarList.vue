@@ -6,6 +6,7 @@ const emit = defineEmits<{
   create: [];
   edit: [radar: SavedSearch];
   toggle: [radar: SavedSearch];
+  toggleNotifications: [radar: SavedSearch];
   remove: [radar: SavedSearch];
 }>();
 
@@ -21,8 +22,8 @@ function date(value: string | null): string {
     <article v-for="radar in radars" :key="radar.id" class="radar-row">
       <div class="radar-status-dot" :class="{ paused: !radar.enabled }" />
       <div class="radar-row-main"><strong>{{ radar.name }}</strong><span>{{ radar.filters.keywords.slice(0, 3).join(' · ') || 'Todos os termos' }}</span></div>
-      <div class="radar-row-meta"><span :class="{ 'radar-paused': !radar.enabled }">{{ radar.enabled ? 'Ativo' : 'Pausado' }}</span><small>Último match: {{ date(radar.lastMatchAt) }}</small></div>
-      <div class="radar-row-actions"><button class="text-action" type="button" @click="emit('edit', radar)">{{ radar.enabled ? 'Editar' : 'Ajustar' }}</button><button class="text-action" type="button" @click="emit('toggle', radar)">{{ radar.enabled ? 'Pausar' : 'Ativar' }}</button><button class="text-action danger-action" type="button" @click="emit('remove', radar)">Excluir</button></div>
+      <div class="radar-row-meta"><span :class="{ 'radar-paused': !radar.enabled }">{{ radar.enabled ? 'Busca ativa' : 'Busca pausada' }}</span><small :class="{ 'radar-paused': !radar.notificationsEnabled }">{{ radar.notificationsEnabled ? 'Alertas ativos' : 'Alertas pausados' }}</small><small>Último match: {{ date(radar.lastMatchAt) }}</small></div>
+      <div class="radar-row-actions"><button class="text-action" type="button" @click="emit('edit', radar)">{{ radar.enabled ? 'Editar' : 'Ajustar' }}</button><button class="text-action" type="button" @click="emit('toggle', radar)">{{ radar.enabled ? 'Pausar busca' : 'Ativar busca' }}</button><button class="text-action" type="button" @click="emit('toggleNotifications', radar)">{{ radar.notificationsEnabled ? 'Silenciar alertas' : 'Ativar alertas' }}</button><button class="text-action danger-action" type="button" @click="emit('remove', radar)">Excluir</button></div>
     </article>
     <small v-if="limit !== null" class="radar-limit">{{ radars.length }} de {{ limit }} radares usados no plano atual.</small>
     <small v-else class="radar-limit">Radares sem limite no plano atual.</small>

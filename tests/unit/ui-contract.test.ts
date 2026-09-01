@@ -13,6 +13,7 @@ describe('contrato visual do SaaS', () => {
     const configuration = readFileSync('app/pages/configuracao.vue', 'utf8');
     const onboarding = readFileSync('app/pages/boas-vindas.vue', 'utf8');
     const radarList = readFileSync('app/components/RadarList.vue', 'utf8');
+    const radarEditor = readFileSync('app/components/RadarEditor.vue', 'utf8');
 
     expect(home).toContain('Licitações');
     expect(home).toContain('Meu kanban');
@@ -31,6 +32,8 @@ describe('contrato visual do SaaS', () => {
     expect(plans).toContain('radarLimit');
     expect(configuration).toContain('Peso de palavras-chave');
     expect(radarList).toContain('Radares salvos');
+    expect(radarList).toContain('toggleNotifications');
+    expect(radarEditor).toContain('Enviar notificações');
     expect(onboarding).toContain('Criar meu radar');
     expect(login).toContain('Seu radar de oportunidades');
     expect(login).toContain('auth-benefit-list');

@@ -163,6 +163,8 @@ No primeiro cadastro, o AptaGov abre uma tela de boas-vindas. Informe palavras-c
 
 Em `Configuração > Radares salvos`, crie buscas separadas por produto, região ou estratégia. Cada radar pode ser editado, pausado, reativado ou excluído. O plano atual mostra o limite de radares; o plano Inicial começa com três. A busca automática executa somente radares ativos a cada dez minutos. A sincronização manual pode executar um radar pausado quando ele estiver selecionado no painel.
 
+Busca e alerta são preferências independentes: `Buscar automaticamente` controla se o radar participa do worker; `Enviar notificações` controla se as novas oportunidades desse radar entram nos alertas por e-mail e PWA. Os radares existentes começam com alertas ligados. Silenciar um radar não interrompe os avisos de prazo das oportunidades já acompanhadas no Kanban.
+
 No painel, use o seletor de radar para pesquisar, ordenar por aderência/publicação/prazo e mostrar somente oportunidades com prazo aberto. Favoritar uma oportunidade mantém o acompanhamento privado da empresa; `Não interessa` retira o item do catálogo sem apagar a licitação do banco.
 
 O aviso de novidade é idempotente por organização e licitação. O aviso de prazo próximo é um evento diferente, enviado uma vez para oportunidades no Kanban ou favoritadas quando vencem em até 48 horas. E-mail e PWA usam a mesma proteção contra repetição.
