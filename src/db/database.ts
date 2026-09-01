@@ -27,7 +27,7 @@ export function createTestDatabase(): SqliteDatabase {
 
 export function migrateDatabase(db: SqliteDatabase): void {
   db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)');
-  const migrations = ['001_initial', '002_saas_auth_and_kanban', '003_email_notifications', '004_push_notifications', '005_billing', '006_organization_scoring', '007_opportunity_source', '008_billing_plan_codes', '009_organization_sync_settings', '010_saved_searches_and_onboarding', '011_opportunity_feedback', '012_notification_events', '013_push_notification_events', '014_radar_notification_preferences'];
+  const migrations = ['001_initial', '002_saas_auth_and_kanban', '003_email_notifications', '004_push_notifications', '005_billing', '006_organization_scoring', '007_opportunity_source', '008_billing_plan_codes', '009_organization_sync_settings', '010_saved_searches_and_onboarding', '011_opportunity_feedback', '012_notification_events', '013_push_notification_events', '014_radar_notification_preferences', '015_agenda_and_opportunity_changes'];
   for (const version of migrations) {
     const alreadyApplied = db.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(version);
     if (alreadyApplied) continue;
