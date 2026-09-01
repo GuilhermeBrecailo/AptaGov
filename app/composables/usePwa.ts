@@ -117,6 +117,15 @@ function getNotificationPermission(): NotificationPermissionState {
   return Notification.permission;
 }
 
+function getStandaloneState(): boolean {
+  if (!import.meta.client) return false;
+
+  const displayModeStandalone = window.matchMedia?.('(display-mode: standalone)').matches ?? false;
+  const iosStandalone = Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+
+  return displayModeStandalone || iosStandalone;
+}
+
 function isMobileUserAgent(userAgent: string): boolean {
   return /android|iphone|ipad|ipod|mobile/i.test(userAgent);
 }

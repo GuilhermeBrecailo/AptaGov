@@ -40,6 +40,7 @@ describe('contrato do PWA', () => {
     expect(composable).toContain('pushManager.subscribe');
     expect(composable).toContain('requiresPwaForNotifications');
     expect(composable).toContain('notificationPermission.value = getNotificationPermission();');
+    expect(composable).toContain('function getStandaloneState()');
     expect(serviceWorker).toContain('showNotification');
     expect(serviceWorker).toContain('notificationclick');
     expect(home).not.toContain('Ativar notificações no dispositivo');
