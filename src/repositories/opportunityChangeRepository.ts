@@ -11,8 +11,8 @@ interface OpportunityChangeEventRow {
   summary: string;
   payload_json: string;
   detected_at: string;
-  read_at: string | null;
   created_at: string;
+  organization_read_at: string | null;
 }
 
 export interface OpportunityChangeRecordInput {
@@ -34,31 +34,51 @@ export class OpportunityChangeRepository {
 
   constructor(private readonly db: SqliteDatabase) {
     this.findByUniqueStatement = db.prepare(`
-      SELECT * FROM opportunity_change_events
+      SELECT e.*, NULL AS organization_read_at
+      FROM opportunity_change_events e
       WHERE opportunity_id = ? AND change_type = ? AND fingerprint = ?
     `);
     this.listStatement = db.prepare(`
-      SELECT e.*
+      SELECT e.*, r.read_at AS organization_read_at
       FROM opportunity_change_events e
-      WHERE EXISTS (
-        SELECT 1
-        FROM opportunity_reminders r
-        WHERE r.organization_id = ? AND r.opportunity_id = e.opportunity_id
+      LEFT JOIN opportunity_change_event_reads r
+        ON r.opportunity_change_event_id = e.id AND r.organization_id = ?
+      WHERE (
+        EXISTS (
+          SELECT 1
+          FROM organization_opportunities oo
+          WHERE oo.organization_id = ? AND oo.opportunity_id = e.opportunity_id
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM opportunity_feedback f
+          WHERE f.organization_id = ? AND f.opportunity_id = e.opportunity_id AND f.status = 'FAVORITED'
+        )
       )
         AND (? IS NULL OR e.opportunity_id = ?)
-        AND (? = 0 OR e.read_at IS NULL)
+        AND (? = 0 OR r.read_at IS NULL)
       ORDER BY e.detected_at DESC, e.id DESC
     `);
     this.markReadStatement = db.prepare(`
-      UPDATE opportunity_change_events
-      SET read_at = ?
-      WHERE id = ?
-        AND read_at IS NULL
-        AND EXISTS (
-          SELECT 1
-          FROM opportunity_reminders r
-          WHERE r.organization_id = ? AND r.opportunity_id = opportunity_change_events.opportunity_id
+      INSERT INTO opportunity_change_event_reads (
+        opportunity_change_event_id, organization_id, read_at, created_at
+      )
+      SELECT e.id, ?, ?, ?
+      FROM opportunity_change_events e
+      WHERE e.id = ?
+        AND (
+          EXISTS (
+            SELECT 1
+            FROM organization_opportunities oo
+            WHERE oo.organization_id = ? AND oo.opportunity_id = e.opportunity_id
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM opportunity_feedback f
+            WHERE f.organization_id = ? AND f.opportunity_id = e.opportunity_id AND f.status = 'FAVORITED'
+          )
         )
+      ON CONFLICT(opportunity_change_event_id, organization_id) DO NOTHING
     `);
     this.insertStatement = db.prepare(`
       INSERT INTO opportunity_change_events (
@@ -90,12 +110,20 @@ export class OpportunityChangeRepository {
   }
 
   listForOrganization(organizationId: number, opportunityId?: number, unreadOnly = false): OpportunityChangeEvent[] {
-    const rows = this.listStatement.all(organizationId, opportunityId ?? null, opportunityId ?? null, unreadOnly ? 1 : 0) as OpportunityChangeEventRow[];
+    const rows = this.listStatement.all(
+      organizationId,
+      organizationId,
+      organizationId,
+      opportunityId ?? null,
+      opportunityId ?? null,
+      unreadOnly ? 1 : 0,
+    ) as OpportunityChangeEventRow[];
     return rows.map(mapRow);
   }
 
   markRead(organizationId: number, id: number): boolean {
-    return this.markReadStatement.run(new Date().toISOString(), id, organizationId).changes > 0;
+    const now = new Date().toISOString();
+    return this.markReadStatement.run(organizationId, now, now, id, organizationId, organizationId).changes > 0;
   }
 
   private findByUnique(opportunityId: number, type: OpportunityChangeType, fingerprint: string): OpportunityChangeEvent | undefined {
@@ -114,7 +142,7 @@ function mapRow(row: OpportunityChangeEventRow): OpportunityChangeEvent {
     summary: row.summary,
     payload: JSON.parse(row.payload_json) as Record<string, unknown>,
     detectedAt: row.detected_at,
-    readAt: row.read_at,
+    readAt: row.organization_read_at,
     createdAt: row.created_at,
   };
 }

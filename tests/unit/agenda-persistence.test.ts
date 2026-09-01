@@ -124,31 +124,13 @@ describe('persistência de agenda operacional', () => {
     const organizations = new OrganizationRepository(db);
     const first = organizations.create('Empresa Radar A');
     const second = organizations.create('Empresa Radar B');
+    const opportunities = new OpportunityRepository(db);
     const firstOpportunityId = createOpportunity(db, 'agenda-3');
     const secondOpportunityId = createOpportunity(db, 'agenda-4');
-    const reminderRepository = new OpportunityReminderRepository(db);
     const changeRepository = new OpportunityChangeRepository(db);
 
-    reminderRepository.create({
-      organizationId: first.id,
-      opportunityId: firstOpportunityId,
-      type: 'BID_DEADLINE',
-      title: 'Prazo oficial',
-      dueAt: '2026-09-10T18:00:00.000Z',
-      status: 'PENDING',
-      note: null,
-      createdByUserId: null,
-    });
-    reminderRepository.create({
-      organizationId: second.id,
-      opportunityId: secondOpportunityId,
-      type: 'BID_DEADLINE',
-      title: 'Prazo oficial',
-      dueAt: '2026-09-10T18:00:00.000Z',
-      status: 'PENDING',
-      note: null,
-      createdByUserId: null,
-    });
+    opportunities.addToKanban(first.id, firstOpportunityId);
+    opportunities.addToKanban(second.id, secondOpportunityId);
 
     const firstInsert = changeRepository.record({
       opportunityId: firstOpportunityId,
@@ -196,5 +178,41 @@ describe('persistência de agenda operacional', () => {
     expect(changeRepository.markRead(first.id, firstInsert.event.id)).toBe(true);
     expect(changeRepository.listForOrganization(first.id, firstOpportunityId, true)).toHaveLength(0);
     expect(changeRepository.listForOrganization(second.id)).toHaveLength(1);
+  });
+
+  it('mantém leitura independente por organização para a mesma oportunidade sem depender de lembretes', () => {
+    const db = createTestDatabase();
+    const organizations = new OrganizationRepository(db);
+    const first = organizations.create('Empresa Compartilhada A');
+    const second = organizations.create('Empresa Compartilhada B');
+    const opportunities = new OpportunityRepository(db);
+    const opportunityId = createOpportunity(db, 'agenda-5');
+    const changeRepository = new OpportunityChangeRepository(db);
+
+    opportunities.addToKanban(first.id, opportunityId);
+    opportunities.addToKanban(second.id, opportunityId);
+
+    const { event } = changeRepository.record({
+      opportunityId,
+      sourceCode: 'PNCP',
+      type: 'STATUS_CHANGED',
+      fingerprint: 'status:qualified',
+      summary: 'Oportunidade qualificada',
+      payload: { from: 'NEW', to: 'QUALIFIED' },
+      detectedAt: '2026-09-01T14:00:00.000Z',
+    });
+
+    expect(changeRepository.listForOrganization(first.id, opportunityId, true)).toMatchObject([
+      { id: event.id, readAt: null },
+    ]);
+    expect(changeRepository.listForOrganization(second.id, opportunityId, true)).toMatchObject([
+      { id: event.id, readAt: null },
+    ]);
+
+    expect(changeRepository.markRead(first.id, event.id)).toBe(true);
+    expect(changeRepository.listForOrganization(first.id, opportunityId, true)).toHaveLength(0);
+    expect(changeRepository.listForOrganization(second.id, opportunityId, true)).toMatchObject([
+      { id: event.id, readAt: null },
+    ]);
   });
 });
