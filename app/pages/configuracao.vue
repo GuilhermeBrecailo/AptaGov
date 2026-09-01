@@ -4,10 +4,15 @@ import RadarList from '../components/RadarList.vue';
 import type { AuthPayload, FilterConfig, NotificationSettings, SavedSearch, SyncSettings } from '../types';
 
 const {
+  canInstall,
+  isIos,
+  requiresPwaForNotifications,
   notificationPermission,
   notificationsEnabled,
   notificationError,
   enableNotifications,
+  install,
+  refreshInstallState,
 } = usePwa();
 const { data: auth, error: authError } = await useFetch<AuthPayload>('/api/auth/me');
 if (authError.value) await navigateTo('/login');
@@ -113,6 +118,15 @@ async function enableDeviceNotifications() {
   message.value = enabled ? 'Notificações do dispositivo ativadas.' : notificationError.value;
 }
 
+async function installPwa() {
+  await install();
+  refreshInstallState();
+}
+
+function verifyPwaInstallation() {
+  refreshInstallState();
+}
+
 async function logout() {
   await $fetch('/api/auth/logout', { method: 'POST' });
   await navigateTo('/login');
@@ -191,13 +205,25 @@ async function logout() {
           <div class="list-heading"><div><span class="section-kicker">Avisos no dispositivo</span><h2>Notificações no celular e computador</h2></div></div>
           <div class="device-notification-card configuration-device-notification">
             <div>
-              <p>Receba um aviso mesmo quando o AptaGov estiver fechado. O navegador pedirá sua permissão na primeira ativação.</p>
+              <p v-if="requiresPwaForNotifications"><strong>Para receber notificações no celular, use o AptaGov instalado.</strong></p>
+              <p v-else>Receba um aviso mesmo quando o AptaGov estiver fechado. O navegador pedirá sua permissão na primeira ativação.</p>
+              <p v-if="requiresPwaForNotifications" class="pwa-install-steps">
+                <template v-if="isIos">No iPhone ou iPad: toque em Compartilhar, escolha “Adicionar à Tela de Início”, abra o AptaGov pelo ícone e volte aqui.</template>
+                <template v-else>Toque em “Instalar AptaGov” ou abra o menu do navegador e escolha “Instalar aplicativo”. Depois, abra o AptaGov pelo ícone.</template>
+              </p>
             </div>
             <div class="device-notification-action">
-              <button v-if="!notificationsEnabled && notificationPermission !== 'denied' && notificationPermission !== 'unsupported'" class="btn btn-primary" type="button" @click="enableDeviceNotifications">Ativar notificações</button>
-              <span v-else-if="notificationsEnabled" class="device-notification-enabled">✓ Notificações ativadas</span>
-              <span v-else-if="notificationPermission === 'denied'" class="device-notification-blocked">Notificações bloqueadas nas configurações do navegador. Libere a permissão para este site e tente novamente.</span>
-              <span v-else class="device-notification-blocked">Notificações não disponíveis neste navegador.</span>
+              <template v-if="requiresPwaForNotifications">
+                <button v-if="canInstall" class="btn btn-primary" type="button" @click="installPwa">Instalar AptaGov</button>
+                <button v-else class="btn btn-outline" type="button" @click="verifyPwaInstallation">Já instalei, verificar</button>
+                <small>O botão de ativação aparece depois que o PWA estiver aberto.</small>
+              </template>
+              <template v-else>
+                <button v-if="!notificationsEnabled && notificationPermission !== 'denied' && notificationPermission !== 'unsupported'" class="btn btn-primary" type="button" @click="enableDeviceNotifications">Ativar notificações</button>
+                <span v-else-if="notificationsEnabled" class="device-notification-enabled">✓ Notificações ativadas</span>
+                <span v-else-if="notificationPermission === 'denied'" class="device-notification-blocked">Notificações bloqueadas nas configurações do navegador. Libere a permissão para este site e tente novamente.</span>
+                <span v-else class="device-notification-blocked">Notificações não disponíveis neste dispositivo.</span>
+              </template>
               <small v-if="notificationError && notificationPermission !== 'denied'">{{ notificationError }}</small>
             </div>
           </div>

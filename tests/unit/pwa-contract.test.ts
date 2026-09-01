@@ -23,7 +23,7 @@ describe('contrato do PWA', () => {
     expect(serviceWorker).toContain('/offline.html');
     expect(serviceWorker).toContain('/api/');
     expect(plugin).toContain('beforeinstallprompt');
-    expect(plugin).toContain("register('/sw.js?v=3')");
+    expect(plugin).toContain("register('/sw.js?v=4',");
     expect(home).toContain('Instalar aplicativo');
     expect(home).toContain('Sem conexão');
   });
@@ -38,10 +38,14 @@ describe('contrato do PWA', () => {
 
     expect(composable).toContain('Notification.requestPermission');
     expect(composable).toContain('pushManager.subscribe');
+    expect(composable).toContain('requiresPwaForNotifications');
+    expect(composable).toContain('notificationPermission.value = getNotificationPermission();');
     expect(serviceWorker).toContain('showNotification');
     expect(serviceWorker).toContain('notificationclick');
     expect(home).not.toContain('Ativar notificações no dispositivo');
     expect(configuration).toContain('Ativar notificações');
+    expect(configuration).toContain('use o AptaGov instalado');
+    expect(configuration).toContain('Já instalei');
     expect(pushApi).toContain("requireActiveBilling(event, 'notifications')");
     expect(migration).toContain('UNIQUE (endpoint)');
   });
@@ -49,7 +53,7 @@ describe('contrato do PWA', () => {
   it('nÃ£o cacheia mÃ³dulos do Nuxt/Vite em desenvolvimento', () => {
     const serviceWorker = readFileSync('public/sw.js', 'utf8');
 
-    expect(serviceWorker).toContain("const CACHE_NAME = 'aptagov-shell-v3';");
+    expect(serviceWorker).toContain("const CACHE_NAME = 'aptagov-shell-v4';");
     expect(serviceWorker).toContain("url.pathname.startsWith('/_nuxt/@')");
     expect(serviceWorker).toContain("url.pathname === '/_nuxt/assets/css/main.css'");
   });

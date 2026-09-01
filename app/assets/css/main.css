@@ -145,6 +145,9 @@ a { color: inherit; }
 .device-notification-action small { color: var(--accent-dark); font-size: .68rem; text-align: right; }
 .device-notification-enabled { color: var(--green); font-size: .78rem; font-weight: 850; }
 .device-notification-blocked { max-width: 290px; color: var(--amber); font-size: .73rem; font-weight: 750; text-align: right; }
+.pwa-install-steps { max-width: 560px !important; margin-top: 9px !important; }
+.device-notification-card strong { color: var(--navy); }
+.device-notification-action .btn-outline { border-color: #b9cce2; }
 .billing-card, .score-settings-card { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin: 0 0 18px; padding: 21px 24px; border: 1px solid #e5d9c3; border-radius: 18px; background: linear-gradient(115deg, #fffaf0, #fff); box-shadow: var(--shadow); }
 .billing-card h2, .score-settings-card h2 { margin: 7px 0 5px; font-size: 1.22rem; letter-spacing: -.045em; }
 .billing-card p, .score-settings-card p { max-width: 650px; margin: 0; color: var(--muted); font-size: .75rem; line-height: 1.5; }

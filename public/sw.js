@@ -1,4 +1,4 @@
-const CACHE_NAME = 'aptagov-shell-v3';
+const CACHE_NAME = 'aptagov-shell-v4';
 const OFFLINE_URL = '/offline.html';
 
 self.addEventListener('install', (event) => {

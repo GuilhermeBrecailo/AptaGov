@@ -14,7 +14,10 @@ export function captureInstallPrompt(event: Event): void {
 export function usePwa() {
   const isOnline = useState('pwa-online', () => import.meta.client ? navigator.onLine : true);
   const canInstall = useState('pwa-can-install', () => false);
-  const installed = useState('pwa-installed', () => import.meta.client && (window.matchMedia('(display-mode: standalone)').matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone)));
+  const installed = useState('pwa-installed', getStandaloneState);
+  const isMobile = useState('pwa-mobile', () => import.meta.client && isMobileUserAgent(navigator.userAgent));
+  const isIos = useState('pwa-ios', () => import.meta.client && isIosUserAgent(navigator.userAgent));
+  const requiresPwaForNotifications = computed(() => isMobile.value && !installed.value);
   const notificationPermission = useState<NotificationPermissionState>('pwa-notification-permission', getNotificationPermission);
   const notificationsEnabled = useState('pwa-notifications-enabled', () => false);
   const notificationError = useState('pwa-notification-error', () => '');
@@ -28,10 +31,19 @@ export function usePwa() {
     canInstall.value = false;
   }
 
+  function refreshInstallState(): void {
+    installed.value = getStandaloneState();
+    if (!import.meta.client) return;
+    isMobile.value = isMobileUserAgent(navigator.userAgent);
+    isIos.value = isIosUserAgent(navigator.userAgent);
+    notificationPermission.value = getNotificationPermission();
+  }
+
   async function refreshNotificationSubscription(): Promise<void> {
     if (!import.meta.client || !('serviceWorker' in navigator)) return;
     try {
       const registration = await navigator.serviceWorker.ready;
+      if (!registration.pushManager) return;
       notificationsEnabled.value = Boolean(await registration.pushManager.getSubscription());
     } catch {
       notificationsEnabled.value = false;
@@ -39,9 +51,17 @@ export function usePwa() {
   }
 
   async function enableNotifications(): Promise<boolean> {
-    if (!import.meta.client || !('Notification' in window) || !('serviceWorker' in navigator)) {
+    if (requiresPwaForNotifications.value) {
       notificationPermission.value = 'unsupported';
-      notificationError.value = 'Este navegador não oferece notificações do dispositivo.';
+      notificationError.value = isIos.value
+        ? 'No iPhone ou iPad, instale o AptaGov na Tela de Início e abra pelo ícone do aplicativo.'
+        : 'Instale o AptaGov como aplicativo para ativar as notificações neste celular.';
+      return false;
+    }
+
+    if (!import.meta.client || !('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+      notificationPermission.value = 'unsupported';
+      notificationError.value = 'Este dispositivo não oferece notificações Web Push. Instale o AptaGov como PWA ou use um navegador compatível.';
       return false;
     }
 
@@ -80,7 +100,10 @@ export function usePwa() {
     isOnline,
     canInstall,
     installed,
+    isIos,
+    requiresPwaForNotifications,
     install,
+    refreshInstallState,
     notificationPermission,
     notificationsEnabled,
     notificationError,
@@ -92,6 +115,14 @@ export function usePwa() {
 function getNotificationPermission(): NotificationPermissionState {
   if (!import.meta.client || !('Notification' in window)) return 'unsupported';
   return Notification.permission;
+}
+
+function isMobileUserAgent(userAgent: string): boolean {
+  return /android|iphone|ipad|ipod|mobile/i.test(userAgent);
+}
+
+function isIosUserAgent(userAgent: string): boolean {
+  return /iphone|ipad|ipod/i.test(userAgent);
 }
 
 function urlBase64ToUint8Array(value: string): Uint8Array {
