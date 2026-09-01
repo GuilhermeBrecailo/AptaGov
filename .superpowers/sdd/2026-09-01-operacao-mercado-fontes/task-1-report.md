@@ -87,7 +87,7 @@ Saída final:
 
 ## Commit SHA(s)
 
-Pendente até a criação dos commits locais desta tarefa.
+- `caccdc6` - `feat: persist operational calendar events`
 
 ## Preocupações
 
