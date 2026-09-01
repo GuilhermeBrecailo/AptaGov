@@ -43,31 +43,54 @@ export async function syncFromPncp(client: PncpSyncClient | PncpSyncClient[], re
   const modalities = filters.modalities;
   const records: OpportunityInput[] = [];
   const clients = Array.isArray(client) ? client : [client];
-  let primaryAvailable = true;
 
   for (const state of states) {
     for (const cityIbge of cities) {
       for (const modality of modalities) {
-        const candidates = primaryAvailable ? clients : clients.slice(1);
-        let pageRecords: Record<string, unknown>[] | undefined;
-        let source: OpportunitySource = 'PNCP';
-        let lastError: unknown;
-        for (const [index, candidate] of candidates.entries()) {
+        const sourceResults = await Promise.all(clients.map(async (candidate) => {
           try {
-            pageRecords = await paginateAll((page) => candidate.fetchPublishedPage({ dateFrom: start, dateTo: end, state, cityIbge, modality }, page));
-            source = candidate.source ?? 'PNCP';
-            if (index > 0) primaryAvailable = false;
-            break;
+            return {
+              source: candidate.source ?? 'PNCP',
+              records: await paginateAll((page) => candidate.fetchPublishedPage({ dateFrom: start, dateTo: end, state, cityIbge, modality }, page)),
+            };
           } catch (error) {
-            lastError = error;
+            return { error };
           }
+        }));
+        const successfulSources = sourceResults.filter(isSuccessfulSourceResult);
+        if (successfulSources.length === 0) {
+          const failedSource = sourceResults.find((result) => 'error' in result);
+          const error = failedSource && 'error' in failedSource ? failedSource.error : undefined;
+          throw error instanceof Error ? error : new Error('No synchronization source available');
         }
-        if (!pageRecords) throw lastError instanceof Error ? lastError : new Error('No synchronization source available');
-        records.push(...pageRecords.map((record) => mapPncpRecord(record, source)));
+        for (const result of successfulSources) {
+          records.push(...result.records.map((record) => mapPncpRecord(record, result.source)));
+        }
       }
     }
   }
-  return syncRecords(records, repository);
+  return syncRecords(deduplicateByPncpId(records), repository);
+}
+
+function isSuccessfulSourceResult(
+  result: { source: OpportunitySource; records: Record<string, unknown>[] } | { error: unknown },
+): result is { source: OpportunitySource; records: Record<string, unknown>[] } {
+  return 'records' in result;
+}
+
+function deduplicateByPncpId(records: OpportunityInput[]): OpportunityInput[] {
+  const unique = new Map<string, OpportunityInput>();
+  for (const record of records) {
+    const previous = unique.get(record.pncpId);
+    if (!previous || sourcePriority(record.source) < sourcePriority(previous.source)) {
+      unique.set(record.pncpId, record);
+    }
+  }
+  return [...unique.values()];
+}
+
+function sourcePriority(source: OpportunitySource | undefined): number {
+  return source === 'PNCP' || source === undefined ? 0 : 1;
 }
 
 export function mapPncpRecord(record: Record<string, unknown>, source: OpportunitySource = 'PNCP'): OpportunityInput {

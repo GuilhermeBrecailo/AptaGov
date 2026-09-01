@@ -18,6 +18,60 @@ const filters: FilterConfig = {
 };
 
 describe('fallback do PNCP', () => {
+  it('consulta as fontes complementares e consolida o mesmo identificador PNCP', async () => {
+    const db = createTestDatabase();
+    const repository = new OpportunityRepository(db);
+    const primaryPages: number[] = [];
+    const complementaryPages: number[] = [];
+    const pncpId = '12345678901234-1-000001/2026';
+    const primary: PncpSyncClient = {
+      source: 'PNCP',
+      fetchPublishedPage: async (_query, page) => {
+        primaryPages.push(page);
+        return { data: [{ numeroControlePNCP: pncpId, objetoCompra: 'Edital do PNCP' }], totalPaginas: 1 };
+      },
+    };
+    const complementary: PncpSyncClient = {
+      source: 'OPEN_DATA',
+      fetchPublishedPage: async (_query, page) => {
+        complementaryPages.push(page);
+        return { data: [{ numeroControlePNCP: pncpId, objetoCompra: 'Edital dos Dados Abertos' }], totalPaginas: 1 };
+      },
+    };
+
+    const result = await syncFromPncp([primary, complementary], repository, filters, new Date('2026-08-31T12:00:00.000Z'));
+
+    expect(primaryPages).toEqual([1]);
+    expect(complementaryPages).toEqual([1]);
+    expect(result.received).toBe(1);
+    expect(result.created).toBe(1);
+    expect(repository.count()).toBe(1);
+    expect(repository.findByPncpId(pncpId)?.source).toBe('PNCP');
+  });
+
+  it('continua com a fonte principal quando a complementar fica indisponível', async () => {
+    const db = createTestDatabase();
+    const repository = new OpportunityRepository(db);
+    let complementaryCalled = false;
+    const primary: PncpSyncClient = {
+      source: 'PNCP',
+      fetchPublishedPage: async () => ({ data: [{ numeroControlePNCP: 'primary-1', objetoCompra: 'Edital principal' }], totalPaginas: 1 }),
+    };
+    const complementary: PncpSyncClient = {
+      source: 'OPEN_DATA',
+      fetchPublishedPage: async () => {
+        complementaryCalled = true;
+        throw new Error('Dados Abertos indisponível');
+      },
+    };
+
+    const result = await syncFromPncp([primary, complementary], repository, filters, new Date('2026-08-31T12:00:00.000Z'));
+
+    expect(complementaryCalled).toBe(true);
+    expect(result.created).toBe(1);
+    expect(repository.count()).toBe(1);
+  });
+
   it('reinicia a paginação na fonte alternativa e registra a origem sem duplicar', async () => {
     const db = createTestDatabase();
     const repository = new OpportunityRepository(db);

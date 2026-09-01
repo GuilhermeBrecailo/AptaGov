@@ -25,7 +25,7 @@ O painel fica em `https://aptagov.site` e o worker continua executando em segund
 
 ## Fluxo do produto
 
-- Se o PNCP estiver indisponível, o worker usa automaticamente a API oficial de Dados Abertos como fallback, preservando o `pncp_id` e exibindo a origem no painel.
+- O worker consulta o PNCP e a API oficial de Dados Abertos do Compras.gov.br como fontes complementares, preservando o `pncp_id`, consolidando duplicidades e exibindo a origem no painel. Se uma fonte ficar indisponível, a outra continua funcionando; se ambas falharem, o ciclo é pausado para investigação.
 - A empresa se cadastra e recebe um período de teste.
 - O worker busca o PNCP imediatamente ao iniciar e repete automaticamente a cada `SYNC_INTERVAL_MINUTES` minutos (10 por padrão), com paginação completa e deduplicação por `pncp_id`. Cada empresa pode desligar a busca automática em `Configuração`; nesse caso, a consulta continua disponível pelo botão manual.
 - O score determinístico usa os filtros da organização e pode ser ajustado no painel.
@@ -43,7 +43,7 @@ O painel fica em `https://aptagov.site` e o worker continua executando em segund
 - `npm run dev`: painel + worker.
 - `npm run db:migrate`: aplica migrações.
 - `npm run backup`: cria backup local.
-- `npm run e2e:real`: PNCP real → sincronização → classificação → backup.
+- `npm run e2e:real`: PNCP + Dados Abertos reais → sincronização → classificação → backup.
 - `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`: verificações.
 
 ## Configuração

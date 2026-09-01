@@ -107,9 +107,11 @@ npm run e2e:real
 
 Esse fluxo consulta o PNCP, percorre todas as páginas, sincroniza por `pncp_id`, classifica por regras e cria backup.
 
-### Fallback de dados
+### Fontes complementares de dados
 
-Se o PNCP estiver indisponível, o worker tenta automaticamente a API de Dados Abertos do Compras.gov.br. O endereço padrão já funciona sem credencial; se necessário, ajuste `OPEN_DATA_BASE_URL` no `.env`. Os registros continuam protegidos pelo mesmo `pncp_id` e o painel mostra quando a origem foi Dados Abertos. Essa fonte pode ter atraso ou cobertura diferente do PNCP e será reconciliada quando a fonte principal voltar.
+Em cada ciclo, o worker consulta o PNCP e a API oficial de Dados Abertos do Compras.gov.br. O endereço padrão já funciona sem credencial; se necessário, ajuste `OPEN_DATA_BASE_URL` no `.env`.
+
+Como as duas fontes podem trazer a mesma contratação, os registros são consolidados pelo mesmo `pncp_id` antes de serem gravados. Quando houver duplicidade, o registro do PNCP é preferido e a origem continua disponível no painel. Se uma fonte ficar indisponível, a outra segue sendo processada; se ambas falharem, o ciclo é pausado e o motivo fica registrado.
 
 ## 8. Publicar em producao com Docker
 
