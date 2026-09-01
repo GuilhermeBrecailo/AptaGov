@@ -7,6 +7,7 @@ Implementação concluída localmente no workspace atual com TDD, testes focados
 ## Arquivos alterados
 
 - `migrations/015_agenda_and_opportunity_changes.sql`
+- `migrations/016_opportunity_change_reads.sql`
 - `src/db/database.ts`
 - `src/domain/operationalTypes.ts`
 - `src/repositories/opportunityReminderRepository.ts`
@@ -117,3 +118,74 @@ Tests  3 passed (3)
 ## Preocupações
 
 - Assumi que o isolamento de `opportunity_change_events` deve ser derivado dos lembretes da organização porque o brief não pediu `organization_id` nessa tabela, mas pediu queries isoladas por organização. Se as próximas tasks precisarem expor eventos também para oportunidades sem lembrete associado, será necessário revisar esse critério de visibilidade.
+
+## Fix round 1
+
+### Achados corrigidos
+
+- `[P1]` O estado de leitura deixou de ser global em `opportunity_change_events.read_at` e passou a ser armazenado por organização em `opportunity_change_event_reads`.
+- `[P2]` A suíte agora cobre explicitamente duas organizações acompanhando a mesma oportunidade e validando leitura independente do mesmo evento.
+
+### Arquivos alterados no fix
+
+- `migrations/016_opportunity_change_reads.sql`
+- `src/db/database.ts`
+- `src/repositories/opportunityChangeRepository.ts`
+- `tests/unit/agenda-persistence.test.ts`
+
+### Decisões do fix
+
+- Adicionei a migration `016_opportunity_change_reads` para criar uma tabela de leitura por organização sem quebrar o schema existente da Task 1.
+- A migration faz backfill de `read_at` legado para organizações que já acompanhavam a oportunidade por `organization_opportunities` ou `opportunity_feedback` com status `FAVORITED`.
+- `OpportunityChangeRepository.listForOrganization` agora considera visibilidade por acompanhamento da oportunidade via Kanban ou favorito, sem depender de lembretes.
+- `OpportunityChangeRepository.markRead` grava leitura idempotente em `opportunity_change_event_reads`, preservando independência entre organizações para o mesmo `event.id`.
+
+### Comandos executados e saídas do fix
+
+#### 1. Vermelho do teste de regressão
+
+Comando:
+
+```text
+rtk npm --prefix 'C:\Users\user\Documents\dev\licitacoes-pncp' test -- --run tests/unit/agenda-persistence.test.ts
+```
+
+Saída:
+
+```text
+> vitest run --run tests/unit/agenda-persistence.test.ts
+RUN  v3.2.7 C:/Users/user/Documents/dev/licitacoes-pncp
+❯ tests/unit/agenda-persistence.test.ts (4 tests | 1 failed) 49ms
+× persistência de agenda operacional > mantém leitura independente por organização para a mesma oportunidade sem depender de lembretes
+→ expected [] to match object [ { id: 1, readAt: null } ]
+```
+
+Leitura: o evento não ficava visível sem lembrete, confirmando a causa raiz apontada no review.
+
+#### 2. Verde final do fix
+
+Comandos:
+
+```text
+rtk npm --prefix 'C:\Users\user\Documents\dev\licitacoes-pncp' test -- --run tests/unit/agenda-persistence.test.ts
+rtk npm --prefix 'C:\Users\user\Documents\dev\licitacoes-pncp' run typecheck
+```
+
+Saídas:
+
+```text
+> vitest run --run tests/unit/agenda-persistence.test.ts
+RUN  v3.2.7 C:/Users/user/Documents/dev/licitacoes-pncp
+✓ tests/unit/agenda-persistence.test.ts (4 tests) 43ms
+Test Files  1 passed (1)
+Tests  4 passed (4)
+```
+
+```text
+> nuxt prepare && tsc --noEmit
+* Types generated in .nuxt.
+```
+
+### Commit do fix
+
+- `7fc9b33` - `fix: isolate change event reads per organization`
