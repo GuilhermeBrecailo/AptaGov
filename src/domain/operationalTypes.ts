@@ -5,6 +5,17 @@ export type ReminderStatus = 'PENDING' | 'COMPLETED' | 'SKIPPED';
 export type OpportunityChangeType = 'DEADLINE_CHANGED' | 'NOTICE_UPDATED' | 'STATUS_CHANGED' | 'DOCUMENT_UPDATED';
 export type ChecklistStatus = 'OPEN' | 'COMPLETED' | 'SKIPPED';
 export type ChecklistCategory = 'DOCUMENTS' | 'COMMERCIAL' | 'PROPOSAL' | 'SESSION' | 'REVIEW';
+export type ChecklistTemplateKey =
+  | 'read_edital'
+  | 'requirements'
+  | 'documents'
+  | 'certificates'
+  | 'pricing_margin'
+  | 'proposal'
+  | 'review'
+  | 'submit'
+  | 'session'
+  | 'result';
 
 export interface OpportunityReminder {
   id: number;
@@ -38,6 +49,7 @@ export interface ChecklistItem {
   id: number;
   organizationId: number;
   opportunityId: number;
+  templateKey: ChecklistTemplateKey | null;
   title: string;
   category: ChecklistCategory;
   status: ChecklistStatus;
@@ -53,6 +65,7 @@ export interface ChecklistItem {
 export interface ChecklistItemInput {
   organizationId: number;
   opportunityId: number;
+  templateKey?: ChecklistTemplateKey | null;
   title: string;
   category: ChecklistCategory;
   assigneeUserId?: number | null;
@@ -62,6 +75,7 @@ export interface ChecklistItemInput {
 }
 
 export interface ChecklistPatch {
+  templateKey?: ChecklistTemplateKey | null;
   title?: string;
   category?: ChecklistCategory;
   status?: ChecklistStatus;

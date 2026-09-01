@@ -1,10 +1,11 @@
 import type { SqliteDatabase } from '../db/database';
-import type { ChecklistCategory, ChecklistItem, ChecklistItemInput, ChecklistPatch, ChecklistStatus } from '../domain/operationalTypes';
+import type { ChecklistCategory, ChecklistItem, ChecklistItemInput, ChecklistPatch, ChecklistStatus, ChecklistTemplateKey } from '../domain/operationalTypes';
 
 interface ChecklistItemRow {
   id: number;
   organization_id: number;
   opportunity_id: number;
+  template_key: ChecklistTemplateKey | null;
   title: string;
   category: ChecklistCategory;
   status: ChecklistStatus;
@@ -36,16 +37,17 @@ export class ChecklistRepository {
     `);
     this.insertStatement = db.prepare(`
       INSERT INTO opportunity_checklist_items (
-        organization_id, opportunity_id, title, category, status, assignee_user_id,
+        organization_id, opportunity_id, template_key, title, category, status, assignee_user_id,
         due_at, note, position, completed_at, created_at, updated_at
       ) VALUES (
-        @organizationId, @opportunityId, @title, @category, @status, @assigneeUserId,
+        @organizationId, @opportunityId, @templateKey, @title, @category, @status, @assigneeUserId,
         @dueAt, @note, @position, @completedAt, @now, @now
       )
     `);
     this.updateStatement = db.prepare(`
       UPDATE opportunity_checklist_items
-      SET title = @title,
+      SET template_key = @templateKey,
+        title = @title,
         category = @category,
         status = @status,
         assignee_user_id = @assigneeUserId,
@@ -61,13 +63,14 @@ export class ChecklistRepository {
         const now = new Date().toISOString();
         this.db.prepare(`
           INSERT INTO opportunity_checklist_items (
-            organization_id, opportunity_id, title, category, status, assignee_user_id,
+            organization_id, opportunity_id, template_key, title, category, status, assignee_user_id,
             due_at, note, position, completed_at, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, NULL, ?, ?)
-          ON CONFLICT(organization_id, opportunity_id, title) DO NOTHING
+          ) VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, NULL, ?, ?)
+          ON CONFLICT(organization_id, opportunity_id, template_key) DO NOTHING
         `).run(
           item.organizationId,
           item.opportunityId,
+          item.templateKey ?? null,
           item.title.trim(),
           item.category,
           item.assigneeUserId ?? null,
@@ -91,6 +94,7 @@ export class ChecklistRepository {
     const result = this.insertStatement.run({
       organizationId: input.organizationId,
       opportunityId: input.opportunityId,
+      templateKey: input.templateKey ?? null,
       title: input.title.trim(),
       category: input.category,
       status: 'OPEN',
@@ -111,6 +115,7 @@ export class ChecklistRepository {
     this.updateStatement.run({
       organizationId,
       id,
+      templateKey: patch.templateKey === undefined ? current.templateKey : patch.templateKey,
       title: patch.title?.trim() ?? current.title,
       category: patch.category ?? current.category,
       status: nextStatus,
@@ -149,6 +154,7 @@ function mapRow(row: ChecklistItemRow): ChecklistItem {
     id: row.id,
     organizationId: row.organization_id,
     opportunityId: row.opportunity_id,
+    templateKey: row.template_key,
     title: row.title,
     category: row.category,
     status: row.status,

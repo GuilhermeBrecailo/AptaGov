@@ -49,6 +49,28 @@ describe('checklist operacional', () => {
     expect(second.map((item) => item.id)).toEqual(first.map((item) => item.id));
   });
 
+  it('mantém a idempotência dos defaults mesmo se um item padrão for renomeado', () => {
+    const db = createTestDatabase();
+    const organization = new OrganizationRepository(db).create('Empresa Checklist');
+    const opportunityId = createOpportunity(db, 'checklist-rename');
+    const service = new ChecklistService(new ChecklistRepository(db));
+
+    const first = service.ensureDefaults(organization.id, opportunityId);
+    const renamed = service.update(organization.id, first[0]!.id, {
+      title: 'ler edital atualizado',
+      note: 'Título ajustado pela operação',
+    });
+    const second = service.ensureDefaults(organization.id, opportunityId);
+
+    expect(renamed).toMatchObject({
+      id: first[0]!.id,
+      title: 'ler edital atualizado',
+    });
+    expect(second).toHaveLength(10);
+    expect(second.filter((item) => item.title === 'ler edital')).toHaveLength(0);
+    expect(second.filter((item) => item.title === 'ler edital atualizado')).toHaveLength(1);
+  });
+
   it('atualiza status, nota e conclusão sem vazar itens entre organizações', () => {
     const db = createTestDatabase();
     const organizations = new OrganizationRepository(db);

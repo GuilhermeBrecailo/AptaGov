@@ -1,17 +1,17 @@
-import type { ChecklistItem, ChecklistItemInput, ChecklistPatch } from '../domain/operationalTypes';
+import type { ChecklistItem, ChecklistItemInput, ChecklistPatch, ChecklistTemplateKey } from '../domain/operationalTypes';
 import { ChecklistRepository } from '../repositories/checklistRepository';
 
-const DEFAULT_CHECKLIST_ITEMS: Array<Pick<ChecklistItemInput, 'title' | 'category'>> = [
-  { title: 'ler edital', category: 'DOCUMENTS' },
-  { title: 'conferir objeto e requisitos', category: 'DOCUMENTS' },
-  { title: 'separar documentos', category: 'DOCUMENTS' },
-  { title: 'validar certidões', category: 'DOCUMENTS' },
-  { title: 'validar preço e margem', category: 'COMMERCIAL' },
-  { title: 'montar proposta', category: 'PROPOSAL' },
-  { title: 'revisar proposta', category: 'PROPOSAL' },
-  { title: 'enviar proposta', category: 'PROPOSAL' },
-  { title: 'preparar sessão', category: 'SESSION' },
-  { title: 'acompanhar resultado', category: 'REVIEW' },
+const DEFAULT_CHECKLIST_ITEMS: Array<Pick<ChecklistItemInput, 'templateKey' | 'title' | 'category'>> = [
+  { templateKey: 'read_edital', title: 'ler edital', category: 'DOCUMENTS' },
+  { templateKey: 'requirements', title: 'conferir objeto e requisitos', category: 'DOCUMENTS' },
+  { templateKey: 'documents', title: 'separar documentos', category: 'DOCUMENTS' },
+  { templateKey: 'certificates', title: 'validar certidões', category: 'DOCUMENTS' },
+  { templateKey: 'pricing_margin', title: 'validar preço e margem', category: 'COMMERCIAL' },
+  { templateKey: 'proposal', title: 'montar proposta', category: 'PROPOSAL' },
+  { templateKey: 'review', title: 'revisar proposta', category: 'PROPOSAL' },
+  { templateKey: 'submit', title: 'enviar proposta', category: 'PROPOSAL' },
+  { templateKey: 'session', title: 'preparar sessão', category: 'SESSION' },
+  { templateKey: 'result', title: 'acompanhar resultado', category: 'REVIEW' },
 ];
 
 export class ChecklistService {
@@ -21,6 +21,7 @@ export class ChecklistService {
     const items = DEFAULT_CHECKLIST_ITEMS.map((item, index) => ({
       organizationId,
       opportunityId,
+      templateKey: item.templateKey,
       title: item.title,
       category: item.category,
       position: index,

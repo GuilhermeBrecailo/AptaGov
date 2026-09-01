@@ -2,6 +2,7 @@ CREATE TABLE IF NOT EXISTS opportunity_checklist_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   opportunity_id INTEGER NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
+  template_key TEXT,
   title TEXT NOT NULL,
   category TEXT NOT NULL CHECK (category IN ('DOCUMENTS', 'COMMERCIAL', 'PROPOSAL', 'SESSION', 'REVIEW')),
   status TEXT NOT NULL CHECK (status IN ('OPEN', 'COMPLETED', 'SKIPPED')) DEFAULT 'OPEN',
@@ -12,7 +13,7 @@ CREATE TABLE IF NOT EXISTS opportunity_checklist_items (
   completed_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  UNIQUE (organization_id, opportunity_id, title)
+  UNIQUE (organization_id, opportunity_id, template_key)
 );
 
 CREATE INDEX IF NOT EXISTS idx_opportunity_checklist_items_org_opportunity_position

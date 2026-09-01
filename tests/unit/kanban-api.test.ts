@@ -4,6 +4,7 @@ import { ChecklistRepository } from '../../src/repositories/checklistRepository'
 import { OrganizationRepository } from '../../src/repositories/organizationRepository';
 import { OpportunityRepository } from '../../src/repositories/opportunityRepository';
 import { UserRepository } from '../../src/repositories/userRepository';
+import { addOpportunityToKanban } from '../../src/services/opportunityService';
 import { ChecklistService } from '../../src/services/checklistService';
 
 describe('kanban por organização', () => {
@@ -18,10 +19,8 @@ describe('kanban por organização', () => {
     const checklist = new ChecklistService(new ChecklistRepository(db));
     const id = opportunities.insert({ pncpId: 'kanban-1', title: 'Licitação', description: '', organization: 'Órgão', state: 'SP', sourceUrl: 'https://pncp.gov.br/1', publicationDate: '2026-08-31T10:00:00.000Z', estimatedValueCents: 0 });
 
-    opportunities.addToKanban(organization.id, id);
-    checklist.ensureDefaults(organization.id, id);
-    opportunities.addToKanban(organization.id, id);
-    checklist.ensureDefaults(organization.id, id);
+    addOpportunityToKanban(opportunities, checklist, organization.id, id);
+    addOpportunityToKanban(opportunities, checklist, organization.id, id);
 
     expect(opportunities.listCatalog({ organizationId: organization.id, kanbanOnly: true }).total).toBe(1);
     expect(checklist.list(organization.id, id)).toHaveLength(10);
@@ -45,10 +44,10 @@ describe('kanban por organização', () => {
       estimatedValueCents: 0,
     });
 
-    opportunities.addToKanban(first.id, id);
-    opportunities.addToKanban(second.id, id);
-    const firstItems = checklist.ensureDefaults(first.id, id);
-    const secondItems = checklist.ensureDefaults(second.id, id);
+    addOpportunityToKanban(opportunities, checklist, first.id, id);
+    addOpportunityToKanban(opportunities, checklist, second.id, id);
+    const firstItems = checklist.list(first.id, id);
+    const secondItems = checklist.list(second.id, id);
     const firstPrimary = firstItems[0]!;
     checklist.update(first.id, firstPrimary.id, { status: 'COMPLETED' });
 

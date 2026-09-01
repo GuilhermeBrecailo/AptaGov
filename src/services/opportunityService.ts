@@ -1,5 +1,6 @@
 import { VALID_TRANSITIONS, type KanbanState } from '../domain/types';
 import type { OpportunityRepository } from '../repositories/opportunityRepository';
+import type { ChecklistService } from './checklistService';
 
 export function transitionOpportunity(repository: OpportunityRepository, opportunityId: number, nextState: KanbanState): void {
   const opportunity = repository.findById(opportunityId);
@@ -11,6 +12,16 @@ export function transitionOpportunity(repository: OpportunityRepository, opportu
   }
   repository.updateState(opportunityId, nextState);
   repository.addEvent(opportunityId, opportunity.kanbanState, nextState);
+}
+
+export function addOpportunityToKanban(
+  repository: OpportunityRepository,
+  checklistService: ChecklistService,
+  organizationId: number,
+  opportunityId: number,
+): void {
+  repository.addToKanban(organizationId, opportunityId);
+  checklistService.ensureDefaults(organizationId, opportunityId);
 }
 
 export function transitionOrganizationOpportunity(
