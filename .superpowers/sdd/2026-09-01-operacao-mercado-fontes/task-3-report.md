@@ -229,3 +229,74 @@ Resultado após a correção: `nuxt prepare && tsc --noEmit` com exit code 0.
 - Nenhum redesenho completo do worker.
 - Event keys, estados de retry e entrega existentes preservados.
 - Nenhum push ou deploy executado.
+
+## Fix round 2 — supressão de alertas e contrato das rotas
+
+### Status
+
+- Finding remanescente corrigido no ponto único de enfileiramento operacional.
+- Commit funcional da rodada: `f7c094d` — `fix: honor operational alert preferences`.
+- Preferência desligada impede novas materializações do reminder correspondente e novas entregas de email/Web Push, sem remover itens existentes.
+- Rotas protegidas renomeadas para os caminhos exatos exigidos pelo brief.
+- Nenhum push, deploy ou segredo alterado.
+
+### Decisões e mapeamento técnico
+
+1. `OperationalSyncService` lê uma vez as preferências da organização em cada entrada operacional e filtra cada change antes de chamar os serviços de email e push.
+2. O mapeamento é explícito: `PROPOSAL_DEADLINE → proposalDeadline`, `SESSION_OPENING → sessionOpening`, `DISPUTE_START → disputeStart` e `CLOSING_RESULT`/`SOURCE_UPDATE → changeAlerts`.
+3. A detecção e persistência da change ocorre antes do filtro. Desligar uma preferência controla materialização/entrega futura, não apaga histórico, reminders ou notificações já existentes.
+4. `changeAlerts` tem default ativo e passou a fazer parte do tipo, repositório e contrato estrito da API de preferências.
+5. Como a migration 019 já havia sido entregue e 020/021 estão reservadas para a Task 5, foi adicionada a migration compatível `019_1_organization_change_alert_preference.sql`. Ela acrescenta apenas `change_alerts_enabled`, com default ativo e check booleano, inclusive para organizações já persistidas.
+6. As rotas foram movidas de `alert-preferences.get.ts`/`.put.ts` para `agenda-preferences.get.ts`/`.put.ts`, preservando autenticação, billing e handlers.
+
+### Arquivos da rodada
+
+- Criado: `migrations/019_1_organization_change_alert_preference.sql`.
+- Renomeados: `server/api/alert-preferences.get.ts` → `server/api/agenda-preferences.get.ts`; `server/api/alert-preferences.put.ts` → `server/api/agenda-preferences.put.ts`.
+- Modificados: `src/db/database.ts`, `src/domain/operationalTypes.ts`, `src/repositories/organizationAlertPreferenceRepository.ts`, `src/services/operationalSyncService.ts`, `tests/unit/change-detection.test.ts`, `tests/unit/agenda-api.test.ts`, `tests/unit/agenda-persistence.test.ts`.
+
+### TDD — vermelhos observados
+
+- Primeiro ciclo: 2 arquivos executados, 12 testes passando e 3 falhando. O repositório não retornava `changeAlerts`; com `proposalDeadline=false` e `changeAlerts=false`, email ainda era persistido. O teste também verificava push e preservação da change.
+- Segundo ciclo: `agenda-api.test.ts` falhou na coleta com `Cannot find module '../../server/api/agenda-preferences.get'`, comprovando que o caminho exato ainda não existia.
+- Após as correções: os testes de prazo confirmam ausência de `BID_DEADLINE`, email e push, mantendo `PROPOSAL_DEADLINE`; os testes gerais confirmam ausência de email e push, mantendo `SOURCE_UPDATE`.
+
+### Comandos e saídas da rodada
+
+- `npm test -- --run tests/unit/change-detection.test.ts tests/unit/agenda-persistence.test.ts` após a implementação da primeira fatia:
+  - 2 arquivos passando; 15 testes passando; 0 falhas.
+- `npm test -- --run tests/unit/agenda-api.test.ts` após a renomeação:
+  - 1 arquivo passando; 6 testes passando; 0 falhas.
+- `npm test -- --run tests/unit/change-detection.test.ts tests/unit/agenda-api.test.ts tests/unit/notification-events.test.ts tests/unit/agenda-persistence.test.ts`:
+  - 4 arquivos passando; 25 testes passando; 0 falhas.
+- `npm run typecheck`:
+  - `nuxt prepare && tsc --noEmit`; exit code 0.
+- `npx eslint <arquivos alterados na fix round 2>`:
+  - `ESLint: No issues found`.
+- `npm test`:
+  - 36 arquivos passando; 104 testes passando; 0 falhas.
+- `git diff --check` e `git diff --cached --check`:
+  - exit code 0.
+- `git commit -m "fix: honor operational alert preferences"`:
+  - commit criado: `f7c094d`.
+
+### SHAs acumulados
+
+- Base anterior à Task 3: `0f75645`.
+- Implementação inicial da Task 3: `df37a33`.
+- Fix round 1: `61ef68b`.
+- Relatório da fix round 1: `c58e304`.
+- Fix round 2: `f7c094d`.
+
+### Concerns após a rodada
+
+1. `019_1` é uma migration de compatibilidade deliberada: evita alterar a 019 já aplicada e mantém 020/021 livres para a Task 5. Rollback, não executado, exige reconstruir a tabela sem `change_alerts_enabled`; seria destrutivo e requer autorização explícita.
+2. Preferências desligadas não removem reminders nem entregas criadas antes da alteração, conforme contrato desta rodada.
+3. O arquivo preexistente não rastreado `docs/superpowers/plans/2026-09-01-operacao-mercado-fontes.md` permaneceu fora dos commits.
+
+### Fora de escopo preservado na rodada
+
+- Nenhuma UI, conector de fonte ou integração Mercado alterada.
+- Nenhum redesenho do worker; o contrato `SyncHooks.onEntry` foi preservado.
+- Event keys e retries existentes foram preservados.
+- Nenhum push, deploy ou segredo alterado.
