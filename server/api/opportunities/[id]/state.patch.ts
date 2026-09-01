@@ -1,5 +1,6 @@
 import { createError, defineEventHandler, getRouterParam, readBody } from 'h3';
 import { VALID_TRANSITIONS, type KanbanState } from '../../../../src/domain/types';
+import { transitionOrganizationOpportunity } from '../../../../src/services/opportunityService';
 import { getRuntime, requireActiveBilling } from '../../../utils/app';
 
 export default defineEventHandler(async (event) => {
@@ -18,8 +19,7 @@ export default defineEventHandler(async (event) => {
     if (!opportunity || !currentState || !VALID_TRANSITIONS[currentState].includes(nextState)) {
       throw createError({ statusCode: 422, statusMessage: 'Transição de estado inválida' });
     }
-    runtime.opportunities.updateOrganizationState(context.organization.id, id, nextState);
-    runtime.opportunities.addEvent(id, currentState, nextState);
+    transitionOrganizationOpportunity(runtime.opportunities, context.organization.id, id, nextState);
     return runtime.opportunities.listCatalog({ organizationId: context.organization.id, q: opportunity.title, pageSize: 50 }).data.find((item) => item.id === id);
   } catch (error) {
     if (error && typeof error === 'object' && 'statusCode' in error) throw error;
