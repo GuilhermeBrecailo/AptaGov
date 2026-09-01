@@ -7,8 +7,8 @@ import { OpportunityChangeRepository } from '../../src/repositories/opportunityC
 import { OpportunityRepository } from '../../src/repositories/opportunityRepository';
 import { OpportunityReminderRepository } from '../../src/repositories/opportunityReminderRepository';
 import { UserRepository } from '../../src/repositories/userRepository';
-import { handleAlertPreferencesGet } from '../../server/api/alert-preferences.get';
-import { handleAlertPreferencesPut } from '../../server/api/alert-preferences.put';
+import { handleAlertPreferencesGet } from '../../server/api/agenda-preferences.get';
+import { handleAlertPreferencesPut } from '../../server/api/agenda-preferences.put';
 import { AgendaService } from '../../src/services/agendaService';
 import { syncRecords } from '../../src/services/syncService';
 import { handleAgendaGet } from '../../server/api/agenda.get';
@@ -207,6 +207,7 @@ describe('agenda e histórico operacional via handlers', () => {
       proposalDeadline: true,
       sessionOpening: true,
       disputeStart: true,
+      changeAlerts: true,
     });
     expect(await handleAlertPreferencesPut({
       db,
@@ -215,11 +216,13 @@ describe('agenda e histórico operacional via handlers', () => {
         proposalDeadline: true,
         sessionOpening: false,
         disputeStart: false,
+        changeAlerts: false,
       },
     })).toMatchObject({
       proposalDeadline: true,
       sessionOpening: false,
       disputeStart: false,
+      changeAlerts: false,
     });
     expect(new AgendaService(db).scheduleOfficialReminders(organization.id, entry.previous, entry.current)
       .map((reminder) => reminder.type)).toEqual(['BID_DEADLINE']);
@@ -278,7 +281,7 @@ describe('agenda e histórico operacional via handlers', () => {
     expect(readFileSync(resolve(root, 'agenda/[id].patch.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
     expect(readFileSync(resolve(root, 'opportunities/[id]/changes.get.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
     expect(readFileSync(resolve(root, 'opportunities/[id]/changes/[changeId]/read.patch.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
-    expect(readFileSync(resolve(root, 'alert-preferences.get.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
-    expect(readFileSync(resolve(root, 'alert-preferences.put.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
+    expect(readFileSync(resolve(root, 'agenda-preferences.get.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
+    expect(readFileSync(resolve(root, 'agenda-preferences.put.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
   });
 });

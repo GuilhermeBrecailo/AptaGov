@@ -29,6 +29,7 @@ export interface OrganizationAlertPreferences {
   proposalDeadline: boolean;
   sessionOpening: boolean;
   disputeStart: boolean;
+  changeAlerts: boolean;
 }
 export type ChecklistStatus = 'OPEN' | 'COMPLETED' | 'SKIPPED';
 export type ChecklistCategory = 'DOCUMENTS' | 'COMMERCIAL' | 'PROPOSAL' | 'SESSION' | 'REVIEW';

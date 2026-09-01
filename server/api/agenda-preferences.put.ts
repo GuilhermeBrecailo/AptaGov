@@ -8,6 +8,7 @@ const alertPreferenceSchema = z.object({
   proposalDeadline: z.boolean(),
   sessionOpening: z.boolean(),
   disputeStart: z.boolean(),
+  changeAlerts: z.boolean(),
 }).strict();
 
 export async function handleAlertPreferencesPut(input: {

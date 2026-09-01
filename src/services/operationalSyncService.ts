@@ -1,4 +1,6 @@
 import type { SqliteDatabase } from '../db/database';
+import type { OpportunityChangeType, OrganizationAlertPreferences } from '../domain/operationalTypes';
+import { OrganizationAlertPreferenceRepository } from '../repositories/organizationAlertPreferenceRepository';
 import { OpportunityChangeRepository } from '../repositories/opportunityChangeRepository';
 import { OpportunityRepository } from '../repositories/opportunityRepository';
 import { AgendaService } from './agendaService';
@@ -11,6 +13,7 @@ export class OperationalSyncService {
   private readonly opportunities: OpportunityRepository;
   private readonly changes: OpportunityChangeService;
   private readonly agenda: AgendaService;
+  private readonly alertPreferences: OrganizationAlertPreferenceRepository;
   private readonly notifications: NotificationService;
   private readonly pushNotifications: PushNotificationService;
 
@@ -18,6 +21,7 @@ export class OperationalSyncService {
     this.opportunities = new OpportunityRepository(db);
     this.changes = new OpportunityChangeService(new OpportunityChangeRepository(db));
     this.agenda = new AgendaService(db);
+    this.alertPreferences = new OrganizationAlertPreferenceRepository(db);
     this.notifications = new NotificationService(db);
     this.pushNotifications = new PushNotificationService(db);
   }
@@ -28,8 +32,10 @@ export class OperationalSyncService {
     if (!opportunity) return;
 
     for (const organizationId of this.opportunities.listOperationalOrganizationIds(opportunity.id)) {
+      const preferences = this.alertPreferences.find(organizationId);
       this.agenda.scheduleOfficialReminders(organizationId, entry.previous, entry.current);
       for (const change of changes) {
+        if (!isAlertEnabled(change.type, preferences)) continue;
         const eventKey = `opportunity-change:${organizationId}:${opportunity.id}:${change.id}`;
         const subject = `Mudança oficial: ${opportunity.title.slice(0, 90)}`;
         const body = `${change.summary}\nAcesse: ${opportunity.sourceUrl}`;
@@ -53,4 +59,11 @@ export class OperationalSyncService {
       }
     }
   }
+}
+
+function isAlertEnabled(type: OpportunityChangeType, preferences: OrganizationAlertPreferences): boolean {
+  if (type === 'PROPOSAL_DEADLINE') return preferences.proposalDeadline;
+  if (type === 'SESSION_OPENING') return preferences.sessionOpening;
+  if (type === 'DISPUTE_START') return preferences.disputeStart;
+  return preferences.changeAlerts;
 }
