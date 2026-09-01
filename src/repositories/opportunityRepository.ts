@@ -235,7 +235,7 @@ export class OpportunityRepository {
     return Number(result.lastInsertRowid);
   }
 
-  upsert(input: OpportunityInput): { id: number; created: boolean } {
+  upsert(input: OpportunityInput): { id: number; created: boolean; previous?: Opportunity; current: Opportunity } {
     const existing = this.findByPncpId(input.pncpId);
     if (existing) {
       const classificationChanged = existing.title !== input.title
@@ -264,9 +264,15 @@ export class OpportunityRepository {
           .run(now, existing.id);
         this.db.prepare('DELETE FROM organization_opportunity_scores WHERE opportunity_id = ?').run(existing.id);
       }
-      return { id: existing.id, created: false };
+      return {
+        id: existing.id,
+        created: false,
+        previous: existing,
+        current: this.findById(existing.id) as Opportunity,
+      };
     }
-    return { id: this.insert(input), created: true };
+    const id = this.insert(input);
+    return { id, created: true, current: this.findById(id) as Opportunity };
   }
 
   updateClassification(id: number, values: {

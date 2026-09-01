@@ -34,6 +34,11 @@ export interface NotificationInput {
   eventKey?: string;
 }
 
+export interface OperationalNotificationInput extends NotificationInput {
+  eventType: string;
+  eventKey: string;
+}
+
 export class NotificationRepository {
   constructor(private readonly db: SqliteDatabase) {}
 
@@ -67,6 +72,10 @@ export class NotificationRepository {
       ON CONFLICT(organization_id, opportunity_id, channel, event_key) DO NOTHING
     `).run(input.organizationId, input.opportunityId, input.eventType ?? 'NEW_OPPORTUNITY', input.eventKey ?? 'new_opportunity', input.recipient, input.subject, input.body, now, now);
     return result.changes > 0;
+  }
+
+  enqueueOperational(input: OperationalNotificationInput): boolean {
+    return this.enqueue(input);
   }
 
   listPending(limit = 100): NotificationDelivery[] {

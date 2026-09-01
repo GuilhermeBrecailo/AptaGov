@@ -1,6 +1,8 @@
 import type { FilterConfig, OpportunityInput, OpportunitySource } from '../domain/types';
+import type { OpportunityOfficialSnapshot } from '../domain/operationalTypes';
 import { paginateAll } from '../integrations/pncp/paginator';
 import type { OpportunityRepository } from '../repositories/opportunityRepository';
+import { normalizeOpportunitySnapshot } from './opportunityChangeService';
 
 export interface PncpSyncClient {
   source?: OpportunitySource;
@@ -17,20 +19,29 @@ export interface SyncResult {
   received: number;
   created: number;
   updated: number;
+  entries: Array<{
+    previous?: OpportunityOfficialSnapshot;
+    current: OpportunityOfficialSnapshot;
+  }>;
 }
 
 export async function syncRecords(records: OpportunityInput[], repository: OpportunityRepository): Promise<SyncResult> {
   let created = 0;
   let updated = 0;
+  const entries: SyncResult['entries'] = [];
   for (const record of records) {
     const result = repository.upsert(record);
+    entries.push({
+      previous: result.previous ? normalizeOpportunitySnapshot(result.previous) : undefined,
+      current: normalizeOpportunitySnapshot(result.current),
+    });
     if (result.created) {
       created += 1;
     } else {
       updated += 1;
     }
   }
-  return { received: records.length, created, updated };
+  return { received: records.length, created, updated, entries };
 }
 
 export async function syncFromPncp(client: PncpSyncClient | PncpSyncClient[], repository: OpportunityRepository, filters: FilterConfig, today = new Date()): Promise<SyncResult> {

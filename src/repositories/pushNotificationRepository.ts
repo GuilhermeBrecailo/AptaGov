@@ -40,6 +40,16 @@ export interface PushQueueOptions {
   opportunityIds?: ReadonlyArray<number>;
 }
 
+export interface OperationalPushInput {
+  organizationId: number;
+  opportunityId: number;
+  title: string;
+  body: string;
+  url: string;
+  eventType: string;
+  eventKey: string;
+}
+
 export class PushNotificationRepository {
   constructor(private readonly db: SqliteDatabase) {}
 
@@ -179,6 +189,41 @@ export class PushNotificationRepository {
       candidate.opportunity_id,
       `A licitação "${candidate.title.slice(0, 110)}" vence em até 48 horas.`,
       candidate.source_url,
+      now,
+      now,
+    ).changes, 0))();
+  }
+
+  queueOperationalAlert(input: OperationalPushInput): number {
+    const now = new Date().toISOString();
+    const subscriptions = this.db.prepare(`
+      SELECT DISTINCT ps.id AS subscription_id
+      FROM push_subscriptions ps
+      INNER JOIN organization_memberships m ON m.user_id = ps.user_id
+      LEFT JOIN billing_accounts b ON b.organization_id = m.organization_id
+      WHERE m.organization_id = ?
+        AND (
+          b.organization_id IS NULL
+          OR (b.status = 'ACTIVE' AND (b.current_period_ends_at IS NULL OR b.current_period_ends_at > ?))
+          OR (b.status = 'TRIALING' AND b.trial_ends_at > ?)
+        )
+      ORDER BY ps.id ASC
+    `).all(input.organizationId, now, now) as Array<{ subscription_id: number }>;
+    const insert = this.db.prepare(`
+      INSERT INTO push_deliveries (
+        subscription_id, opportunity_id, event_type, event_key, title, body, url,
+        status, attempts, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', 0, ?, ?)
+      ON CONFLICT(subscription_id, opportunity_id, event_key) DO NOTHING
+    `);
+    return this.db.transaction(() => subscriptions.reduce((count, subscription) => count + insert.run(
+      subscription.subscription_id,
+      input.opportunityId,
+      input.eventType,
+      input.eventKey,
+      input.title,
+      input.body,
+      input.url,
       now,
       now,
     ).changes, 0))();

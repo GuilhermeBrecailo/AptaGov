@@ -6,6 +6,7 @@ import {
   type PushSubscriptionInput,
   type PushDelivery,
   type PushQueueOptions,
+  type OperationalPushInput,
 } from '../repositories/pushNotificationRepository';
 import { scoreOpportunity } from './scoring/ruleScorer';
 
@@ -78,6 +79,10 @@ export class PushNotificationService {
 
   queueUpcomingDeadlines(organizationId: number, from: string, to: string, limit = Number.POSITIVE_INFINITY): number {
     return this.push.queueUpcomingDeadlines(organizationId, from, to, limit);
+  }
+
+  queueOperationalAlert(input: OperationalPushInput): number {
+    return this.push.queueOperationalAlert(input);
   }
 
   pendingCount(): number {

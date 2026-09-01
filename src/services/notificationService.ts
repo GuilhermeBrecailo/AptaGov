@@ -17,6 +17,15 @@ export interface NotificationSender {
   send(message: EmailMessage): Promise<{ providerId?: string }>;
 }
 
+export interface OperationalEmailAlert {
+  organizationId: number;
+  opportunityId: number;
+  subject: string;
+  body: string;
+  eventType: string;
+  eventKey: string;
+}
+
 export class NotificationService {
   private readonly notifications: NotificationRepository;
   private readonly opportunities: OpportunityRepository;
@@ -77,6 +86,15 @@ export class NotificationService {
       if (queued) remaining -= 1;
       return count + (queued ? 1 : 0);
     }, 0);
+  }
+
+  queueOperationalAlert(input: OperationalEmailAlert): boolean {
+    const settings = this.notifications.findSettings(input.organizationId);
+    if (!settings?.enabled) return false;
+    return this.notifications.enqueueOperational({
+      ...input,
+      recipient: settings.email,
+    });
   }
 
   queueRecentForEnabledOrganizations(

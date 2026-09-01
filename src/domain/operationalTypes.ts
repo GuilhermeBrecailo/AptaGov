@@ -2,7 +2,27 @@ import type { OpportunitySource } from './types';
 
 export type ReminderType = 'BID_DEADLINE' | 'DOCUMENT_REVIEW' | 'FOLLOW_UP' | 'MEETING';
 export type ReminderStatus = 'PENDING' | 'COMPLETED' | 'SKIPPED';
-export type OpportunityChangeType = 'DEADLINE_CHANGED' | 'NOTICE_UPDATED' | 'STATUS_CHANGED' | 'DOCUMENT_UPDATED';
+export type OpportunityChangeType =
+  | 'PROPOSAL_DEADLINE'
+  | 'SESSION_OPENING'
+  | 'DISPUTE_START'
+  | 'CLOSING_RESULT'
+  | 'SOURCE_UPDATE';
+
+export interface OpportunityOfficialSnapshot {
+  opportunityId: number;
+  sourceCode: OpportunitySource;
+  biddingDeadline: string | null;
+  sessionOpening: string | null;
+  disputeStart: string | null;
+  closingResult: string | null;
+  title: string;
+  description: string;
+  estimatedValueCents: number;
+  editalUrl: string | null;
+  officialFiles: string[];
+  fingerprint: string;
+}
 export type ChecklistStatus = 'OPEN' | 'COMPLETED' | 'SKIPPED';
 export type ChecklistCategory = 'DOCUMENTS' | 'COMMERCIAL' | 'PROPOSAL' | 'SESSION' | 'REVIEW';
 export type ChecklistTemplateKey =

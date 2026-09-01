@@ -1,3 +1,6 @@
+import Database from 'better-sqlite3';
+import { readFileSync, readdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createTestDatabase } from '../../src/db/database';
 import { OrganizationRepository } from '../../src/repositories/organizationRepository';
@@ -20,6 +23,40 @@ function createOpportunity(db: ReturnType<typeof createTestDatabase>, pncpId: st
 }
 
 describe('persistência de agenda operacional', () => {
+  it('migra eventos legados convergentes sem perder eventos ou leituras', () => {
+    const db = new Database(':memory:');
+    db.pragma('foreign_keys = ON');
+    const migrationsDirectory = resolve('migrations');
+    for (const filename of readdirSync(migrationsDirectory).filter((name) => name.slice(0, 3) <= '017').sort()) {
+      db.exec(readFileSync(resolve(migrationsDirectory, filename), 'utf8'));
+    }
+    const organization = new OrganizationRepository(db).create('Empresa Migração');
+    const opportunityId = createOpportunity(db, 'agenda-migration');
+    new OpportunityRepository(db).addToKanban(organization.id, opportunityId);
+    const insert = db.prepare(`
+      INSERT INTO opportunity_change_events (
+        opportunity_id, source_code, change_type, fingerprint, summary,
+        payload_json, detected_at, read_at, created_at
+      ) VALUES (?, 'PNCP', ?, 'same-fingerprint', ?, '{}', ?, NULL, ?)
+    `);
+    const now = '2026-09-01T12:00:00.000Z';
+    const noticeId = Number(insert.run(opportunityId, 'NOTICE_UPDATED', 'Edital atualizado', now, now).lastInsertRowid);
+    insert.run(opportunityId, 'DOCUMENT_UPDATED', 'Documento atualizado', now, now);
+    db.prepare(`
+      INSERT INTO opportunity_change_event_reads (
+        opportunity_change_event_id, organization_id, read_at, created_at
+      ) VALUES (?, ?, ?, ?)
+    `).run(noticeId, organization.id, now, now);
+
+    expect(() => db.exec(readFileSync(resolve(migrationsDirectory, '018_opportunity_change_types.sql'), 'utf8'))).not.toThrow();
+    expect(db.prepare('SELECT change_type, fingerprint FROM opportunity_change_events ORDER BY id').all()).toEqual([
+      { change_type: 'SOURCE_UPDATE', fingerprint: 'NOTICE_UPDATED:same-fingerprint' },
+      { change_type: 'SOURCE_UPDATE', fingerprint: 'DOCUMENT_UPDATED:same-fingerprint' },
+    ]);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM opportunity_change_event_reads').get()).toEqual({ count: 1 });
+    db.close();
+  });
+
   it('mantém unicidade idempotente do lembrete por organização, oportunidade, tipo e vencimento', () => {
     const db = createTestDatabase();
     const organization = new OrganizationRepository(db).create('Empresa Agenda');
@@ -135,7 +172,7 @@ describe('persistência de agenda operacional', () => {
     const firstInsert = changeRepository.record({
       opportunityId: firstOpportunityId,
       sourceCode: 'PNCP',
-      type: 'DEADLINE_CHANGED',
+      type: 'PROPOSAL_DEADLINE',
       fingerprint: 'deadline:2026-09-12T18:00:00.000Z',
       summary: 'Prazo alterado para 12/09',
       payload: { from: '2026-09-10T18:00:00.000Z', to: '2026-09-12T18:00:00.000Z' },
@@ -144,7 +181,7 @@ describe('persistência de agenda operacional', () => {
     const duplicateInsert = changeRepository.record({
       opportunityId: firstOpportunityId,
       sourceCode: 'PNCP',
-      type: 'DEADLINE_CHANGED',
+      type: 'PROPOSAL_DEADLINE',
       fingerprint: 'deadline:2026-09-12T18:00:00.000Z',
       summary: 'Prazo alterado para 12/09',
       payload: { from: '2026-09-10T18:00:00.000Z', to: '2026-09-12T18:00:00.000Z' },
@@ -153,7 +190,7 @@ describe('persistência de agenda operacional', () => {
     const secondInsert = changeRepository.record({
       opportunityId: secondOpportunityId,
       sourceCode: 'PNCP',
-      type: 'NOTICE_UPDATED',
+      type: 'SOURCE_UPDATE',
       fingerprint: 'notice:v2',
       summary: 'Edital republicado',
       payload: { revision: 2 },
@@ -195,7 +232,7 @@ describe('persistência de agenda operacional', () => {
     const { event } = changeRepository.record({
       opportunityId,
       sourceCode: 'PNCP',
-      type: 'STATUS_CHANGED',
+      type: 'CLOSING_RESULT',
       fingerprint: 'status:qualified',
       summary: 'Oportunidade qualificada',
       payload: { from: 'NEW', to: 'QUALIFIED' },
@@ -249,7 +286,7 @@ describe('persistência de agenda operacional', () => {
     const { event } = changeRepository.record({
       opportunityId,
       sourceCode: 'PNCP',
-      type: 'DOCUMENT_UPDATED',
+      type: 'SOURCE_UPDATE',
       fingerprint: 'doc:anexo-1',
       summary: 'Anexo atualizado',
       payload: { file: 'anexo-1.pdf' },

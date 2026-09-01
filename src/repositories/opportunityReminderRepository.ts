@@ -45,6 +45,7 @@ export class OpportunityReminderRepository {
   private readonly findByIdStatement;
   private readonly findIdempotentStatement;
   private readonly listStatement;
+  private readonly listForOpportunityStatement;
   private readonly insertStatement;
   private readonly updateStatement;
   private readonly createTransaction;
@@ -58,6 +59,11 @@ export class OpportunityReminderRepository {
     this.listStatement = db.prepare(`
       SELECT * FROM opportunity_reminders
       WHERE organization_id = ? AND due_at >= ? AND due_at <= ?
+      ORDER BY due_at ASC, id ASC
+    `);
+    this.listForOpportunityStatement = db.prepare(`
+      SELECT * FROM opportunity_reminders
+      WHERE organization_id = ? AND opportunity_id = ?
       ORDER BY due_at ASC, id ASC
     `);
     this.insertStatement = db.prepare(`
@@ -99,6 +105,11 @@ export class OpportunityReminderRepository {
 
   listForOrganization(organizationId: number, range: OpportunityReminderRange): OpportunityReminder[] {
     const rows = this.listStatement.all(organizationId, range.from, range.to) as OpportunityReminderRow[];
+    return rows.map(mapRow);
+  }
+
+  listForOpportunity(organizationId: number, opportunityId: number): OpportunityReminder[] {
+    const rows = this.listForOpportunityStatement.all(organizationId, opportunityId) as OpportunityReminderRow[];
     return rows.map(mapRow);
   }
 

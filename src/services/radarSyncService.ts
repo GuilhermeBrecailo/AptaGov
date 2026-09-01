@@ -9,15 +9,17 @@ export interface RadarForRun {
   filters: FilterConfig;
 }
 
+type SyncCounts = Pick<SyncResult, 'received' | 'created' | 'updated'>;
+
 export async function runSelectedRadars<T extends RadarForRun>(
   radars: T[],
   mode: SyncMode,
   radarId: number | undefined,
-  run: (radar: T) => Promise<SyncResult>,
+  run: (radar: T) => Promise<SyncCounts>,
   markRun: (radar: T, runAt: string, lastMatchAt: string | null) => void,
-): Promise<SyncResult> {
+): Promise<SyncCounts> {
   const selected = selectRadarsForRun(radars, mode, radarId);
-  const total: SyncResult = { received: 0, created: 0, updated: 0 };
+  const total: SyncCounts = { received: 0, created: 0, updated: 0 };
   for (const radar of selected) {
     const runAt = new Date().toISOString();
     const result = await run(radar);
