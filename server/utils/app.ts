@@ -5,6 +5,7 @@ import type { BillingFeature } from '../../src/services/billingService';
 import { getAuthContext } from '../../src/auth/service';
 import { SessionRepository } from '../../src/repositories/sessionRepository';
 import { createError, getCookie, type H3Event } from 'h3';
+import { SavedSearchService } from '../../src/services/savedSearchService';
 
 let runtime: WorkerRuntime | undefined;
 let database: SqliteDatabase | undefined;
@@ -25,6 +26,11 @@ export function getRuntime(): WorkerRuntime {
     runtime = new WorkerRuntime(env, getAppDatabase());
   }
   return runtime;
+}
+
+export function getSavedSearchService(): SavedSearchService {
+  const env = loadEnv();
+  return new SavedSearchService(getAppDatabase(), env.billingPlans, { trialDays: env.billingTrialDays });
 }
 
 export function requireAuth(event: H3Event) {

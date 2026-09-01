@@ -1,5 +1,5 @@
 import type { SqliteDatabase } from '../db/database';
-import type { KanbanState, Opportunity, OpportunityInput, ClassificationSource, OpportunitySource } from '../domain/types';
+import type { FilterConfig, KanbanState, Opportunity, OpportunityInput, ClassificationSource, OpportunitySource } from '../domain/types';
 
 type OpportunityRow = {
   id: number;
@@ -38,10 +38,17 @@ export interface CatalogQuery {
   page?: number;
   pageSize?: number;
   kanbanOnly?: boolean;
+  feedback?: 'favorite' | 'not_relevant';
+  hideNotRelevant?: boolean;
+  radarFilters?: FilterConfig;
+  openDeadlineOnly?: boolean;
+  sort?: 'score' | 'deadline' | 'publication';
 }
 
 export interface CatalogOpportunity extends Opportunity {
   inKanban: boolean;
+  favorite: boolean;
+  notRelevant: boolean;
 }
 
 export interface CatalogPage {
@@ -79,7 +86,7 @@ export class OpportunityRepository {
     const pageSize = Math.min(50, Math.max(1, Math.floor(query.pageSize ?? 20)));
     const conditions = ['1 = 1'];
     const organizationId = query.organizationId ?? -1;
-    const params: Array<string | number> = [organizationId, organizationId];
+    const params: Array<string | number> = [organizationId, organizationId, organizationId];
     const search = query.q?.trim();
     if (search) {
       conditions.push('(o.title LIKE ? OR o.description LIKE ? OR o.organization LIKE ?)');
@@ -95,23 +102,36 @@ export class OpportunityRepository {
       params.push(query.state);
     }
     if (query.kanbanOnly) conditions.push('oo.opportunity_id IS NOT NULL');
+    if (query.feedback === 'favorite') conditions.push("feedback.status = 'FAVORITED'");
+    if (query.feedback === 'not_relevant') conditions.push("feedback.status = 'NOT_RELEVANT'");
+    if (query.hideNotRelevant !== false && query.feedback !== 'not_relevant') conditions.push("(feedback.status IS NULL OR feedback.status != 'NOT_RELEVANT')");
+    addRadarFilters(conditions, params, query.radarFilters);
+    if (query.openDeadlineOnly) conditions.push("o.bidding_deadline IS NOT NULL AND julianday(o.bidding_deadline) > julianday('now')");
     const where = conditions.join(' AND ');
     const from = `FROM opportunities o
       LEFT JOIN organization_opportunities oo ON oo.opportunity_id = o.id AND oo.organization_id = ?
-      LEFT JOIN organization_opportunity_scores os ON os.opportunity_id = o.id AND os.organization_id = ?`;
+      LEFT JOIN organization_opportunity_scores os ON os.opportunity_id = o.id AND os.organization_id = ?
+      LEFT JOIN opportunity_feedback feedback ON feedback.opportunity_id = o.id AND feedback.organization_id = ?`;
     const total = (this.db.prepare(`SELECT COUNT(*) AS count ${from} WHERE ${where}`).get(...params) as { count: number }).count;
     const rows = this.db.prepare(`
       SELECT o.*, oo.kanban_state AS organization_kanban_state,
         os.score AS organization_score,
         os.score_breakdown_json AS organization_score_breakdown_json,
-        os.classification_source AS organization_classification_source
+        os.classification_source AS organization_classification_source,
+        feedback.status AS feedback_status
       ${from}
       WHERE ${where}
-      ORDER BY COALESCE(os.score, o.score) DESC, o.publication_date DESC
+      ORDER BY ${catalogOrder(query.sort)}
       LIMIT ? OFFSET ?
-    `).all(...params, pageSize, (page - 1) * pageSize) as Array<OpportunityRow & OrganizationScoreRow & { organization_kanban_state: KanbanState | null }>;
+    `).all(...params, pageSize, (page - 1) * pageSize) as Array<OpportunityRow & OrganizationScoreRow & { organization_kanban_state: KanbanState | null; feedback_status: 'FAVORITED' | 'NOT_RELEVANT' | null }>;
     return {
-      data: rows.map((row) => ({ ...mapRowWithOrganizationScore(row), kanbanState: row.organization_kanban_state ?? 'NEW', inKanban: row.organization_kanban_state !== null })),
+      data: rows.map((row) => ({
+        ...mapRowWithOrganizationScore(row),
+        kanbanState: row.organization_kanban_state ?? 'NEW',
+        inKanban: row.organization_kanban_state !== null,
+        favorite: row.feedback_status === 'FAVORITED',
+        notRelevant: row.feedback_status === 'NOT_RELEVANT',
+      })),
       total,
       page,
       pageSize,
@@ -173,6 +193,25 @@ export class OpportunityRepository {
       WHERE o.created_at >= ? AND COALESCE(os.score, o.score) >= ?
       ORDER BY COALESCE(os.score, o.score) DESC, o.publication_date DESC
     `).all(organizationId, since, score) as Array<OpportunityRow & OrganizationScoreRow>;
+    return rows.map(mapRowWithOrganizationScore);
+  }
+
+  listDeadlineSoon(organizationId: number, from: string, to: string, minimumScore = 0): Opportunity[] {
+    const rows = this.db.prepare(`
+      SELECT o.*, os.score AS organization_score,
+        os.score_breakdown_json AS organization_score_breakdown_json,
+        os.classification_source AS organization_classification_source
+      FROM opportunities o
+      LEFT JOIN organization_opportunity_scores os
+        ON os.opportunity_id = o.id AND os.organization_id = ?
+      WHERE o.bidding_deadline >= ? AND o.bidding_deadline <= ?
+        AND COALESCE(os.score, o.score) >= ?
+        AND (
+          EXISTS (SELECT 1 FROM organization_opportunities oo WHERE oo.organization_id = ? AND oo.opportunity_id = o.id)
+          OR EXISTS (SELECT 1 FROM opportunity_feedback f WHERE f.organization_id = ? AND f.opportunity_id = o.id AND f.status = 'FAVORITED')
+        )
+      ORDER BY o.bidding_deadline ASC, COALESCE(os.score, o.score) DESC
+    `).all(organizationId, from, to, Math.max(0, Math.min(100, minimumScore)), organizationId, organizationId) as Array<OpportunityRow & OrganizationScoreRow>;
     return rows.map(mapRowWithOrganizationScore);
   }
 
@@ -273,6 +312,42 @@ export class OpportunityRepository {
     this.db.prepare('INSERT INTO opportunity_events (opportunity_id, from_state, to_state, created_at) VALUES (?, ?, ?, ?)')
       .run(id, fromState, toState, new Date().toISOString());
   }
+}
+
+function addRadarFilters(conditions: string[], params: Array<string | number>, filters: FilterConfig | undefined): void {
+  if (!filters) return;
+  if (filters.states.length > 0) {
+    conditions.push(`o.state IN (${filters.states.map(() => '?').join(', ')})`);
+    params.push(...filters.states);
+  }
+  const catalogCities = filters.citiesIbge.filter((city) => !/^\d+$/.test(city));
+  if (catalogCities.length > 0) {
+    conditions.push(`o.city IN (${catalogCities.map(() => '?').join(', ')})`);
+    params.push(...catalogCities);
+  }
+  const catalogModalities = filters.modalities.filter((modality) => !/^\d+$/.test(modality));
+  if (catalogModalities.length > 0) {
+    conditions.push(`o.modality IN (${catalogModalities.map(() => '?').join(', ')})`);
+    params.push(...catalogModalities);
+  }
+  if (filters.keywords.length > 0) {
+    conditions.push(`(${filters.keywords.map(() => '(o.title LIKE ? OR o.description LIKE ?)').join(' OR ')})`);
+    for (const keyword of filters.keywords) params.push(`%${keyword}%`, `%${keyword}%`);
+  }
+  if (filters.excludedKeywords.length > 0) {
+    conditions.push(`NOT (${filters.excludedKeywords.map(() => '(o.title LIKE ? OR o.description LIKE ?)').join(' OR ')})`);
+    for (const keyword of filters.excludedKeywords) params.push(`%${keyword}%`, `%${keyword}%`);
+  }
+  if (filters.estimatedValueMinCents > 0) {
+    conditions.push('o.estimated_value_cents >= ?');
+    params.push(filters.estimatedValueMinCents);
+  }
+}
+
+function catalogOrder(sort: CatalogQuery['sort']): string {
+  if (sort === 'deadline') return "CASE WHEN o.bidding_deadline IS NULL THEN 1 ELSE 0 END, o.bidding_deadline ASC, COALESCE(os.score, o.score) DESC";
+  if (sort === 'publication') return 'o.publication_date DESC, COALESCE(os.score, o.score) DESC';
+  return 'COALESCE(os.score, o.score) DESC, o.publication_date DESC';
 }
 
 function mapRow(row: OpportunityRow): Opportunity {

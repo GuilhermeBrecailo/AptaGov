@@ -47,6 +47,7 @@ export async function registerUser(db: SqliteDatabase, input: RegisterInput): Pr
     const organization = organizations.create(organizationName);
     organizations.addMember(organization.id, user.id, 'OWNER');
     filters.save(organization.id, loadFilters());
+    // O onboarding é concluído depois do cadastro, quando o cliente escolhe seu primeiro radar.
     new BillingService(db, { trialDays: loadEnv().billingTrialDays }).ensureTrial(organization.id);
     return { user, organization };
   })();

@@ -11,7 +11,7 @@ export class MercadoPagoBillingProvider {
     planOrPrice: BillingPlanDefinition | number,
   ) {
     this.plan = typeof planOrPrice === 'number'
-      ? { code: 'STARTER', name: 'plano inicial', description: '', priceCents: planOrPrice, maxUsers: 1, maxOrganizations: 1, monthlyAlerts: 300 }
+      ? { code: 'STARTER', name: 'plano inicial', description: '', priceCents: planOrPrice, maxUsers: 1, maxOrganizations: 1, monthlyAlerts: 300, maxRadars: 3 }
       : planOrPrice;
   }
 

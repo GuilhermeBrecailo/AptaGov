@@ -20,6 +20,9 @@ import { NotificationBudgetRepository } from './repositories/notificationBudgetR
 import { logger } from './observability/logger';
 import { OrganizationSyncSettingsRepository } from './repositories/organizationSyncSettingsRepository';
 import { shouldRunSync, type SyncMode } from './services/syncPolicy';
+import { SavedSearchRepository } from './repositories/savedSearchRepository';
+import { runSelectedRadars } from './services/radarSyncService';
+import { selectRadarsForRun } from './services/savedSearchService';
 
 export interface WorkerCycleResult {
   paused: boolean;
@@ -32,6 +35,7 @@ export interface WorkerCycleResult {
 export interface WorkerCycleOptions {
   mode?: SyncMode;
   organizationId?: number;
+  radarId?: number;
 }
 
 export class WorkerRuntime {
@@ -75,14 +79,39 @@ export class WorkerRuntime {
     this.jobs.markRunning(jobId);
     let phase = 'sync';
     try {
-      const filters = loadFilters();
-      const syncResult = await syncFromPncp([this.pncp, this.openData], this.opportunities, filters);
-      phase = 'classification';
-      const classification = await classifyOpportunities(this.opportunities, filters);
+      const defaultFilters = loadFilters();
       const organizationFilters = new OrganizationFilterRepository(this.db);
+      const savedSearches = new SavedSearchRepository(this.db);
+      const organizations = new OrganizationRepository(this.db).listAll()
+        .filter((organization) => options.organizationId === undefined || organization.id === options.organizationId)
+        .filter((organization) => mode === 'manual' || enabledOrganizationIds.includes(organization.id));
+      const syncResult = { received: 0, created: 0, updated: 0 };
+      for (const organization of organizations) {
+        const radars = savedSearches.list(organization.id);
+        if (radars.length > 0) {
+          const result = await runSelectedRadars(
+            radars,
+            mode,
+            options.radarId,
+            (radar) => syncFromPncp([this.pncp, this.openData], this.opportunities, radar.filters),
+            (radar, runAt, lastMatchAt) => savedSearches.markRun(organization.id, radar.id, runAt, lastMatchAt),
+          );
+          syncResult.received += result.received;
+          syncResult.created += result.created;
+          syncResult.updated += result.updated;
+          continue;
+        }
+        const filters = organizationFilters.find(organization.id) ?? defaultFilters;
+        const result = await syncFromPncp([this.pncp, this.openData], this.opportunities, filters);
+        syncResult.received += result.received;
+        syncResult.created += result.created;
+        syncResult.updated += result.updated;
+      }
+      phase = 'classification';
+      const classification = await classifyOpportunities(this.opportunities, defaultFilters);
       let organizationClassified = 0;
       for (const organization of new OrganizationRepository(this.db).listAll()) {
-        const currentFilters = organizationFilters.find(organization.id) ?? organizationFilters.save(organization.id, filters);
+        const currentFilters = organizationFilters.find(organization.id) ?? organizationFilters.save(organization.id, defaultFilters);
         const result = await classifyOrganizationOpportunities(this.opportunities, organization.id, currentFilters, { onlyUnclassified: true });
         organizationClassified += result.classified;
       }
@@ -92,17 +121,37 @@ export class WorkerRuntime {
       const notificationOrganizationIds = mode === 'manual' && options.organizationId !== undefined
         ? [options.organizationId]
         : enabledOrganizationIds;
-      notificationBudget -= this.notifications.queueRecentForOrganizations(
-        cycleStartedAt,
-        notificationBudget,
-        new Set(notificationOrganizationIds),
-        (organizationId) => this.billing.canUse(organizationId, 'notifications'),
-      );
-      this.pushNotifications.queueRecent(
+      for (const organizationId of notificationOrganizationIds) {
+        if (notificationBudget <= 0 || !this.billing.canUse(organizationId, 'notifications')) continue;
+        const radars = savedSearches.list(organizationId);
+        const selectedRadars = selectRadarsForRun(radars, mode, options.radarId);
+        if (radars.length === 0) {
+          const currentFilters = organizationFilters.find(organizationId) ?? defaultFilters;
+          notificationBudget -= this.notifications.queueRecent(organizationId, cycleStartedAt, currentFilters.minimumScore, notificationBudget);
+          continue;
+        }
+        for (const radar of selectedRadars) {
+          if (notificationBudget <= 0) break;
+          notificationBudget -= this.notifications.queueRecentForRadar(organizationId, radar.filters, cycleStartedAt, notificationBudget);
+        }
+      }
+      const deadlineFrom = new Date().toISOString();
+      const deadlineTo = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+      for (const organizationId of notificationOrganizationIds) {
+        if (notificationBudget <= 0 || !this.billing.canUse(organizationId, 'notifications')) continue;
+        const queued = this.notifications.queueUpcomingDeadlines(organizationId, deadlineFrom, deadlineTo, notificationBudget);
+        notificationBudget -= queued;
+      }
+      notificationBudget -= this.pushNotifications.queueRecent(
         cycleStartedAt,
         notificationBudget,
         mode === 'automatic' ? { automaticOnly: true } : { organizationId: options.organizationId },
       );
+      for (const organizationId of notificationOrganizationIds) {
+        if (notificationBudget <= 0 || !this.billing.canUse(organizationId, 'notifications')) continue;
+        const queued = this.pushNotifications.queueUpcomingDeadlines(organizationId, deadlineFrom, deadlineTo, notificationBudget);
+        notificationBudget -= queued;
+      }
       let notified = 0;
       if (this.notifications.pendingCount() > 0) {
         notified = await this.notifications.deliverPending(new ResendEmailNotifier(this.env.resendApiKey, this.env.notificationEmailFrom));

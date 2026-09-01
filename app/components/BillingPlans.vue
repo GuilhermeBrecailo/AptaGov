@@ -21,6 +21,10 @@ function userLimit(value: number | null): string {
 function alertLimit(value: number | null): string {
   return value === null ? 'Alertas sem limite' : `${value.toLocaleString('pt-BR')} alertas/mês`;
 }
+
+function radarLimit(value: number | null): string {
+  return value === null ? 'Radares sem limite' : `${value} ${value === 1 ? 'radar' : 'radares'}`;
+}
 </script>
 
 <template>
@@ -42,6 +46,7 @@ function alertLimit(value: number | null): string {
           <li>Catálogo, score e Kanban completos</li>
           <li>{{ userLimit(plan.maxUsers) }}</li>
           <li>{{ alertLimit(plan.monthlyAlerts) }}</li>
+          <li>{{ radarLimit(plan.maxRadars) }}</li>
         </ul>
         <button class="btn" :class="plan.code === 'PRO' ? 'btn-primary' : 'btn-ghost'" :disabled="busy || currentCode === plan.code" @click="emit('select', plan.code)">
           {{ currentCode === plan.code ? 'Plano atual' : busy && selectedCode === plan.code ? 'Abrindo checkout…' : `Escolher ${plan.name}` }}

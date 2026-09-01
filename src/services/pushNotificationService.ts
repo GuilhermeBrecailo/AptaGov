@@ -50,6 +50,10 @@ export class PushNotificationService {
     return this.push.queueRecent(since, limit, options);
   }
 
+  queueUpcomingDeadlines(organizationId: number, from: string, to: string, limit = Number.POSITIVE_INFINITY): number {
+    return this.push.queueUpcomingDeadlines(organizationId, from, to, limit);
+  }
+
   pendingCount(): number {
     return this.push.pendingCount();
   }

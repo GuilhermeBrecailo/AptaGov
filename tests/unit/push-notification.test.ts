@@ -77,4 +77,25 @@ describe('notificações no dispositivo', () => {
     expect(service.queueRecent('2026-08-31T00:00:00.000Z', Number.POSITIVE_INFINITY, { automaticOnly: true })).toBe(0);
     expect(service.queueRecent('2026-08-31T00:00:00.000Z', Number.POSITIVE_INFINITY, { organizationId: organization.id })).toBe(1);
   });
+
+  it('enfileira alerta de prazo próximo sem colidir com a novidade', () => {
+    const db = createTestDatabase();
+    const user = new UserRepository(db).create({ name: 'Dani', email: 'dani@push.test', passwordHash: 'hash' });
+    const organization = new OrganizationRepository(db).create('Empresa Push Prazo');
+    new OrganizationRepository(db).addMember(organization.id, user.id, 'OWNER');
+    const opportunities = new OpportunityRepository(db);
+    const opportunityId = opportunities.insert({
+      pncpId: 'push-deadline-1', title: 'Prazo próximo', description: 'software', organization: 'Prefeitura', state: 'SP',
+      sourceUrl: 'https://pncp.gov.br/push-deadline-1', publicationDate: '2026-09-01T10:00:00.000Z',
+      biddingDeadline: '2026-09-02T10:00:00.000Z', estimatedValueCents: 0,
+    });
+    opportunities.updateClassification(opportunityId, { score: 90, breakdown: {}, source: 'rules' });
+    opportunities.addToKanban(organization.id, opportunityId);
+    const service = new PushNotificationService(db);
+    service.registerSubscription(user.id, { ...subscription, endpoint: 'https://push.example.test/deadline' });
+
+    expect(service.queueRecent('2026-09-01T00:00:00.000Z')).toBe(1);
+    expect(service.queueUpcomingDeadlines(organization.id, '2026-09-01T10:00:00.000Z', '2026-09-03T10:00:00.000Z')).toBe(1);
+    expect(service.queueUpcomingDeadlines(organization.id, '2026-09-01T10:00:00.000Z', '2026-09-03T10:00:00.000Z')).toBe(0);
+  });
 });

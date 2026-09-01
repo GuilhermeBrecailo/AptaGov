@@ -20,6 +20,8 @@ export interface PushDelivery {
   id: number;
   subscriptionId: number;
   opportunityId: number;
+  eventType: string;
+  eventKey: string;
   endpoint: string;
   p256dh: string;
   auth: string;
@@ -103,21 +105,68 @@ export class PushNotificationRepository {
       )
       AND NOT EXISTS (
         SELECT 1 FROM push_deliveries d
-        WHERE d.subscription_id = ps.id AND d.opportunity_id = o.id
+        WHERE d.subscription_id = ps.id AND d.opportunity_id = o.id AND d.event_key = 'new_opportunity'
       )
       ORDER BY o.created_at ASC, ps.id ASC
       LIMIT ?
     `).all(...queryParams) as PushQueueCandidate[];
     const insert = this.db.prepare(`
       INSERT INTO push_deliveries (
-        subscription_id, opportunity_id, title, body, url, status, attempts, created_at, updated_at
-      ) VALUES (?, ?, 'Nova oportunidade aderente', ?, ?, 'PENDING', 0, ?, ?)
-      ON CONFLICT(subscription_id, opportunity_id) DO NOTHING
+        subscription_id, opportunity_id, event_type, event_key, title, body, url, status, attempts, created_at, updated_at
+      ) VALUES (?, ?, 'NEW_OPPORTUNITY', 'new_opportunity', 'Nova oportunidade aderente', ?, ?, 'PENDING', 0, ?, ?)
+      ON CONFLICT(subscription_id, opportunity_id, event_key) DO NOTHING
     `);
     return this.db.transaction(() => candidates.reduce((count, candidate) => count + insert.run(
       candidate.subscription_id,
       candidate.opportunity_id,
       `A licitação "${candidate.title.slice(0, 110)}" atingiu seu score.`,
+      candidate.source_url,
+      now,
+      now,
+    ).changes, 0))();
+  }
+
+  queueUpcomingDeadlines(organizationId: number, from: string, to: string, limit = Number.POSITIVE_INFINITY): number {
+    const now = new Date().toISOString();
+    const candidates = this.db.prepare(`
+      SELECT DISTINCT ps.id AS subscription_id, o.id AS opportunity_id, o.title, o.source_url
+      FROM push_subscriptions ps
+      INNER JOIN opportunities o ON o.bidding_deadline >= ? AND o.bidding_deadline <= ?
+      WHERE EXISTS (
+        SELECT 1
+        FROM organization_memberships m
+        LEFT JOIN organization_filters f ON f.organization_id = m.organization_id
+        LEFT JOIN organization_opportunity_scores os ON os.organization_id = m.organization_id AND os.opportunity_id = o.id
+        LEFT JOIN billing_accounts b ON b.organization_id = m.organization_id
+        WHERE m.user_id = ps.user_id AND m.organization_id = ?
+          AND COALESCE(os.score, o.score) >= COALESCE(json_extract(f.filters_json, '$.minimumScore'), 0)
+          AND (
+            b.organization_id IS NULL
+            OR (b.status = 'ACTIVE' AND (b.current_period_ends_at IS NULL OR b.current_period_ends_at > ?))
+            OR (b.status = 'TRIALING' AND b.trial_ends_at > ?)
+          )
+          AND (
+            EXISTS (SELECT 1 FROM organization_opportunities oo WHERE oo.organization_id = m.organization_id AND oo.opportunity_id = o.id)
+            OR EXISTS (SELECT 1 FROM opportunity_feedback feedback WHERE feedback.organization_id = m.organization_id AND feedback.opportunity_id = o.id AND feedback.status = 'FAVORITED')
+          )
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM push_deliveries d
+        WHERE d.subscription_id = ps.id AND d.opportunity_id = o.id AND d.event_key = 'deadline_48h'
+      )
+      ORDER BY o.bidding_deadline ASC, ps.id ASC
+      LIMIT ?
+    `).all(from, to, organizationId, now, now, normalizeLimit(limit)) as PushQueueCandidate[];
+    const insert = this.db.prepare(`
+      INSERT INTO push_deliveries (
+        subscription_id, opportunity_id, event_type, event_key, title, body, url, status, attempts, created_at, updated_at
+      ) VALUES (?, ?, 'DEADLINE_SOON', 'deadline_48h', 'Prazo próximo', ?, ?, 'PENDING', 0, ?, ?)
+      ON CONFLICT(subscription_id, opportunity_id, event_key) DO NOTHING
+    `);
+    return this.db.transaction(() => candidates.reduce((count, candidate) => count + insert.run(
+      candidate.subscription_id,
+      candidate.opportunity_id,
+      `A licitação "${candidate.title.slice(0, 110)}" vence em até 48 horas.`,
       candidate.source_url,
       now,
       now,
@@ -176,6 +225,8 @@ type PushQueueCandidate = {
 type PushDeliveryRow = PushSubscriptionRow & {
   subscription_id: number;
   opportunity_id: number;
+  event_type: string;
+  event_key: string;
   title: string;
   body: string;
   url: string;
@@ -199,6 +250,8 @@ function mapDelivery(row: PushDeliveryRow): PushDelivery {
     id: row.id,
     subscriptionId: row.subscription_id,
     opportunityId: row.opportunity_id,
+    eventType: row.event_type,
+    eventKey: row.event_key,
     endpoint: row.endpoint,
     p256dh: row.p256dh,
     auth: row.auth,

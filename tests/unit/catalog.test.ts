@@ -3,6 +3,7 @@ import { createTestDatabase } from '../../src/db/database';
 import { OrganizationRepository } from '../../src/repositories/organizationRepository';
 import { OpportunityRepository } from '../../src/repositories/opportunityRepository';
 import { UserRepository } from '../../src/repositories/userRepository';
+import type { FilterConfig } from '../../src/domain/types';
 
 describe('catálogo de licitações', () => {
   it('pesquisa, filtra por score e preserva paginação', () => {
@@ -38,5 +39,17 @@ describe('catálogo de licitações', () => {
 
     expect(opportunities.listCatalog({ organizationId: organizationA.id, kanbanOnly: true }).data).toHaveLength(1);
     expect(opportunities.listCatalog({ organizationId: organizationB.id, kanbanOnly: true }).data).toHaveLength(0);
+  });
+
+  it('aplica os filtros do radar selecionado no catálogo', () => {
+    const db = createTestDatabase();
+    const opportunities = new OpportunityRepository(db);
+    opportunities.insert({ pncpId: 'catalog-radar-software', title: 'Sistema de software', description: '', organization: 'Prefeitura SP', state: 'SP', modality: 'Pregão', sourceUrl: 'https://pncp.gov.br/catalog-radar-software', publicationDate: '2026-09-01T10:00:00.000Z', biddingDeadline: new Date(Date.now() + 86_400_000).toISOString(), estimatedValueCents: 100_000 });
+    opportunities.insert({ pncpId: 'catalog-radar-obra', title: 'Obra civil', description: '', organization: 'Prefeitura SP', state: 'SP', modality: 'Pregão', sourceUrl: 'https://pncp.gov.br/catalog-radar-obra', publicationDate: '2026-09-01T10:00:00.000Z', biddingDeadline: new Date(Date.now() + 86_400_000).toISOString(), estimatedValueCents: 100_000 });
+    const radarFilters: FilterConfig = { lookbackDays: 3, states: ['SP'], citiesIbge: [], modalities: ['Pregão'], keywords: ['software'], excludedKeywords: [], minimumScore: 0, estimatedValueMinCents: 0, scoreWeights: { keyword: 50, region: 20, value: 10, deadline: 20 } };
+
+    const page = opportunities.listCatalog({ radarFilters, openDeadlineOnly: true, sort: 'deadline' });
+
+    expect(page.data.map((item) => item.pncpId)).toEqual(['catalog-radar-software']);
   });
 });

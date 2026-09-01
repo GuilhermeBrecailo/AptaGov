@@ -13,6 +13,8 @@ export interface NotificationDelivery {
   organizationId: number;
   opportunityId: number;
   channel: 'email';
+  eventType: string;
+  eventKey: string;
   recipient: string;
   subject: string;
   body: string;
@@ -28,6 +30,8 @@ export interface NotificationInput {
   recipient: string;
   subject: string;
   body: string;
+  eventType?: string;
+  eventKey?: string;
 }
 
 export class NotificationRepository {
@@ -58,10 +62,10 @@ export class NotificationRepository {
     const now = new Date().toISOString();
     const result = this.db.prepare(`
       INSERT INTO notification_deliveries (
-        organization_id, opportunity_id, channel, recipient, subject, body, status, attempts, created_at, updated_at
-      ) VALUES (?, ?, 'email', ?, ?, ?, 'PENDING', 0, ?, ?)
-      ON CONFLICT(organization_id, opportunity_id, channel) DO NOTHING
-    `).run(input.organizationId, input.opportunityId, input.recipient, input.subject, input.body, now, now);
+        organization_id, opportunity_id, channel, event_type, event_key, recipient, subject, body, status, attempts, created_at, updated_at
+      ) VALUES (?, ?, 'email', ?, ?, ?, ?, ?, 'PENDING', 0, ?, ?)
+      ON CONFLICT(organization_id, opportunity_id, channel, event_key) DO NOTHING
+    `).run(input.organizationId, input.opportunityId, input.eventType ?? 'NEW_OPPORTUNITY', input.eventKey ?? 'new_opportunity', input.recipient, input.subject, input.body, now, now);
     return result.changes > 0;
   }
 
@@ -108,6 +112,8 @@ type NotificationDeliveryRow = {
   organization_id: number;
   opportunity_id: number;
   channel: 'email';
+  event_type: string;
+  event_key: string;
   recipient: string;
   subject: string;
   body: string;
@@ -127,6 +133,8 @@ function mapDelivery(row: NotificationDeliveryRow): NotificationDelivery {
     organizationId: row.organization_id,
     opportunityId: row.opportunity_id,
     channel: row.channel,
+    eventType: row.event_type,
+    eventKey: row.event_key,
     recipient: row.recipient,
     subject: row.subject,
     body: row.body,

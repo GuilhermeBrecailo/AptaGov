@@ -12,6 +12,10 @@ export interface PlatformAdminMetrics {
     estimatedMrrCents: number;
     opportunities: number;
     notificationsThisMonth: number;
+    completedOnboardingOrganizations: number;
+    activeRadars: number;
+    favoritedOpportunities: number;
+    kanbanOpportunities: number;
   };
   plans: Array<BillingPlanDefinition & {
     organizationCount: number;
@@ -36,6 +40,10 @@ export function buildPlatformAdminMetrics(db: SqliteDatabase, plans: BillingPlan
   const userCount = count(db, 'SELECT COUNT(*) AS count FROM users');
   const opportunityCount = count(db, 'SELECT COUNT(*) AS count FROM opportunities');
   const notificationsThisMonth = countNotificationsThisMonth(db, startOfMonth(now));
+  const completedOnboardingOrganizations = count(db, 'SELECT COUNT(*) AS count FROM organizations WHERE onboarding_completed_at IS NOT NULL');
+  const activeRadars = count(db, 'SELECT COUNT(*) AS count FROM saved_searches WHERE enabled = 1');
+  const favoritedOpportunities = count(db, "SELECT COUNT(*) AS count FROM opportunity_feedback WHERE status = 'FAVORITED'");
+  const kanbanOpportunities = count(db, 'SELECT COUNT(*) AS count FROM organization_opportunities');
   const planStats = plans.map((plan) => {
     const matching = accountRows.filter((account) => account.plan_code === plan.code);
     const activeCount = matching.filter((account) => account.status === 'ACTIVE').length;
@@ -78,6 +86,10 @@ export function buildPlatformAdminMetrics(db: SqliteDatabase, plans: BillingPlan
       estimatedMrrCents,
       opportunities: opportunityCount,
       notificationsThisMonth,
+      completedOnboardingOrganizations,
+      activeRadars,
+      favoritedOpportunities,
+      kanbanOpportunities,
     },
     plans: planStats,
     recentOrganizations: recentOrganizations.map((organization) => ({

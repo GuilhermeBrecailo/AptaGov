@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import type { AuthPayload, FilterConfig, NotificationSettings, SyncSettings } from '../types';
+import RadarEditor from '../components/RadarEditor.vue';
+import RadarList from '../components/RadarList.vue';
+import type { AuthPayload, FilterConfig, NotificationSettings, SavedSearch, SyncSettings } from '../types';
 
 const {
   notificationPermission,
@@ -13,8 +15,13 @@ if (authError.value) await navigateTo('/login');
 const { data: filters, refresh: refreshFilters } = await useFetch<FilterConfig>('/api/filters');
 const { data: notification, refresh: refreshNotification } = await useFetch<NotificationSettings>('/api/notifications');
 const { data: syncSettings, refresh: refreshSyncSettings } = await useFetch<SyncSettings>('/api/sync-settings');
+const { data: radarPayload, refresh: refreshRadars } = await useFetch<{ data: SavedSearch[]; limit: number | null }>('/api/radars', {
+  default: () => ({ data: [], limit: 3 }),
+});
 const message = ref('');
 const savingSyncSettings = ref(false);
+const editingRadar = ref<SavedSearch | null>(null);
+const creatingRadar = ref(false);
 
 type ListFilterKey = 'keywords' | 'excludedKeywords' | 'states' | 'citiesIbge' | 'modalities';
 
@@ -66,6 +73,41 @@ async function saveSyncSettings() {
   }
 }
 
+function openRadarEditor(radar?: SavedSearch) {
+  editingRadar.value = radar ?? null;
+  creatingRadar.value = !radar;
+}
+
+function closeRadarEditor() {
+  editingRadar.value = null;
+  creatingRadar.value = false;
+}
+
+async function saveRadar(payload: { id?: number; name: string; filters: FilterConfig; enabled: boolean }) {
+  try {
+    if (payload.id) await $fetch(`/api/radars/${payload.id}`, { method: 'PATCH', body: payload });
+    else await $fetch('/api/radars', { method: 'POST', body: payload });
+    message.value = 'Radar salvo.';
+    closeRadarEditor();
+    await refreshRadars();
+  } catch (error) {
+    message.value = error instanceof Error ? error.message : 'Não foi possível salvar o radar.';
+  }
+}
+
+async function toggleRadar(radar: SavedSearch) {
+  await $fetch(`/api/radars/${radar.id}`, { method: 'PATCH', body: { enabled: !radar.enabled } });
+  message.value = radar.enabled ? 'Radar pausado.' : 'Radar ativado.';
+  await refreshRadars();
+}
+
+async function removeRadar(radar: SavedSearch) {
+  if (!globalThis.confirm(`Excluir o radar “${radar.name}”?`)) return;
+  await $fetch(`/api/radars/${radar.id}`, { method: 'DELETE' });
+  message.value = 'Radar excluído.';
+  await refreshRadars();
+}
+
 async function enableDeviceNotifications() {
   const enabled = await enableNotifications();
   message.value = enabled ? 'Notificações do dispositivo ativadas.' : notificationError.value;
@@ -95,6 +137,10 @@ async function logout() {
       <div v-if="message" class="notice">{{ message }}</div>
 
       <div v-if="filters" class="configuration-layout">
+        <section class="content-surface configuration-surface radar-management-surface">
+          <RadarList :radars="radarPayload?.data ?? []" :limit="radarPayload?.limit ?? 3" @create="openRadarEditor()" @edit="openRadarEditor" @toggle="toggleRadar" @remove="removeRadar" />
+        </section>
+        <RadarEditor v-if="creatingRadar || editingRadar" :radar="editingRadar" :filters="filters" @save="saveRadar" @close="closeRadarEditor" />
         <section class="content-surface configuration-surface">
           <div class="list-heading"><div><span class="section-kicker">Filtros do catálogo</span><h2>O que merece sua atenção</h2></div><span class="configuration-scope">Exclusivo da sua empresa</span></div>
           <div class="configuration-grid">

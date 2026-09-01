@@ -64,6 +64,10 @@ function statusLabel(status: string): string {
           <div><span class="section-kicker">Atenção</span><strong>{{ metrics.summary.pastDueOrganizations }}</strong><p>empresas com pagamento pendente</p></div>
           <div><span class="section-kicker">Oportunidades</span><strong>{{ metrics.summary.opportunities.toLocaleString('pt-BR') }}</strong><p>registros no radar</p></div>
           <div><span class="section-kicker">Alertas no mês</span><strong>{{ metrics.summary.notificationsThisMonth.toLocaleString('pt-BR') }}</strong><p>e-mail e PWA enfileirados</p></div>
+          <div><span class="section-kicker">Ativação</span><strong>{{ metrics.summary.completedOnboardingOrganizations }} / {{ metrics.summary.organizations }}</strong><p>empresas que concluíram o primeiro radar</p></div>
+          <div><span class="section-kicker">Radares</span><strong>{{ metrics.summary.activeRadars }}</strong><p>buscas ativas no momento</p></div>
+          <div><span class="section-kicker">Aderência</span><strong>{{ metrics.summary.favoritedOpportunities }}</strong><p>oportunidades favoritadas</p></div>
+          <div><span class="section-kicker">Pipeline</span><strong>{{ metrics.summary.kanbanOpportunities }}</strong><p>oportunidades no Kanban</p></div>
         </section>
 
         <section class="admin-grid">

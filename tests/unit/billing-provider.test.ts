@@ -31,6 +31,7 @@ describe('adaptador de cobrança do Mercado Pago', () => {
       maxUsers: 15,
       maxOrganizations: 1,
       monthlyAlerts: 5_000,
+      maxRadars: 25,
     } as never);
 
     const result = await provider.createSubscription({ organizationId: 7, payerEmail: 'empresa@example.com' });

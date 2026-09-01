@@ -17,6 +17,8 @@ export interface CatalogOpportunity {
   score: number;
   scoreBreakdown: Record<string, number>;
   inKanban: boolean;
+  favorite: boolean;
+  notRelevant: boolean;
 }
 
 export interface CatalogPage {
@@ -56,6 +58,25 @@ export interface SyncSettings {
   intervalMinutes: number;
 }
 
+export interface SavedSearch {
+  id: number;
+  organizationId: number;
+  name: string;
+  filters: FilterConfig;
+  enabled: boolean;
+  lastRunAt: string | null;
+  lastMatchAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OnboardingPayload {
+  completed: boolean;
+  completedAt: string | null;
+  filters: FilterConfig;
+  radars: SavedSearch[];
+}
+
 export interface BillingPayload {
   plan: 'TRIAL' | 'PRO';
   planCode: 'STARTER' | 'PRO' | 'BUSINESS' | 'UNLIMITED';
@@ -76,6 +97,7 @@ export interface BillingPlanView {
   maxUsers: number | null;
   maxOrganizations: number | null;
   monthlyAlerts: number | null;
+  maxRadars: number | null;
 }
 
 export interface AuthPayload {
@@ -96,6 +118,10 @@ export interface PlatformAdminMetrics {
     estimatedMrrCents: number;
     opportunities: number;
     notificationsThisMonth: number;
+    completedOnboardingOrganizations: number;
+    activeRadars: number;
+    favoritedOpportunities: number;
+    kanbanOpportunities: number;
   };
   plans: Array<BillingPlanView & { organizationCount: number; activeCount: number; estimatedMrrCents: number }>;
   recentOrganizations: Array<{

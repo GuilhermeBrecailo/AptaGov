@@ -3,6 +3,10 @@ import { createTestDatabase } from '../../src/db/database';
 import { BillingService } from '../../src/services/billingService';
 import { OrganizationRepository } from '../../src/repositories/organizationRepository';
 import { UserRepository } from '../../src/repositories/userRepository';
+import { SavedSearchRepository } from '../../src/repositories/savedSearchRepository';
+import { OpportunityRepository } from '../../src/repositories/opportunityRepository';
+import { OpportunityFeedbackRepository } from '../../src/repositories/opportunityFeedbackRepository';
+import type { FilterConfig } from '../../src/domain/types';
 
 describe('painel administrativo da plataforma', () => {
   it('mantém o plano escolhido em uma coluna compatível com contas existentes', () => {
@@ -57,5 +61,25 @@ describe('painel administrativo da plataforma', () => {
     expect(metrics.summary.estimatedMrrCents).toBe(19_900);
     expect(metrics.plans.find((plan: { code: string }) => plan.code === 'BUSINESS')?.organizationCount).toBe(1);
     expect(metrics.recentOrganizations[0]?.ownerEmail).toBe('owner-b@example.com');
+  });
+
+  it('mostra ativação, radares ativos, favoritas e entrada no Kanban', async () => {
+    const db = createTestDatabase();
+    const organization = new OrganizationRepository(db).create('Empresa Ativada');
+    new OrganizationRepository(db).markOnboardingCompleted(organization.id);
+    const filters: FilterConfig = { lookbackDays: 3, states: [], citiesIbge: [], modalities: ['6'], keywords: [], excludedKeywords: [], minimumScore: 0, estimatedValueMinCents: 0, scoreWeights: { keyword: 50, region: 20, value: 10, deadline: 20 } };
+    new SavedSearchRepository(db).create(organization.id, 'Radar ativo', filters);
+    const opportunityId = new OpportunityRepository(db).insert({ pncpId: 'admin-usage-1', title: 'Oportunidade', description: '', organization: 'Prefeitura', state: 'SP', sourceUrl: 'https://pncp.gov.br/admin-usage-1', publicationDate: '2026-09-01T10:00:00.000Z', estimatedValueCents: 0 });
+    new OpportunityRepository(db).addToKanban(organization.id, opportunityId);
+    new OpportunityFeedbackRepository(db).save(organization.id, opportunityId, 'FAVORITED');
+
+    const loaded = await import('../../src/services/' + 'platformAdminService');
+    const env = (await import('../../src/config/env')).loadEnv({ NODE_ENV: 'test', DATABASE_URL: ':memory:' });
+    const metrics = loaded.buildPlatformAdminMetrics(db, env.billingPlans);
+
+    expect(metrics.summary.completedOnboardingOrganizations).toBe(1);
+    expect(metrics.summary.activeRadars).toBe(1);
+    expect(metrics.summary.favoritedOpportunities).toBe(1);
+    expect(metrics.summary.kanbanOpportunities).toBe(1);
   });
 });

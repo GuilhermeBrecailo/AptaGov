@@ -11,7 +11,7 @@ async function submit() {
   errorMessage.value = '';
   try {
     await $fetch('/api/auth/signup', { method: 'POST', body: { name: name.value, organizationName: organizationName.value, email: email.value, password: password.value } });
-    await navigateTo('/');
+    await navigateTo('/boas-vindas');
   } catch (error) {
     errorMessage.value = getApiError(error, 'Não foi possível criar a conta');
   } finally {

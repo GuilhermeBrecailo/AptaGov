@@ -155,7 +155,19 @@ npm run dev
 
 Nunca restaure arquivos de origem desconhecida. O banco atual deve ser copiado antes da troca para permitir retorno manual.
 
-## 11. Verificação completa
+## 11. Primeiro radar e radares salvos
+
+No primeiro cadastro, o AptaGov abre uma tela de boas-vindas. Informe palavras-chave, exclusões, estados, modalidades, score mínimo e o e-mail dos alertas. Você pode fazer essa etapa depois e completar em `Configuração`.
+
+Em `Configuração > Radares salvos`, crie buscas separadas por produto, região ou estratégia. Cada radar pode ser editado, pausado, reativado ou excluído. O plano atual mostra o limite de radares; o plano Inicial começa com três. A busca automática executa somente radares ativos a cada dez minutos. A sincronização manual pode executar um radar pausado quando ele estiver selecionado no painel.
+
+No painel, use o seletor de radar para pesquisar, ordenar por aderência/publicação/prazo e mostrar somente oportunidades com prazo aberto. Favoritar uma oportunidade mantém o acompanhamento privado da empresa; `Não interessa` retira o item do catálogo sem apagar a licitação do banco.
+
+O aviso de novidade é idempotente por organização e licitação. O aviso de prazo próximo é um evento diferente, enviado uma vez para oportunidades no Kanban ou favoritadas quando vencem em até 48 horas. E-mail e PWA usam a mesma proteção contra repetição.
+
+O `/admin` exibe, além da receita e dos planos, quantas empresas concluíram o primeiro radar, quantos radares estão ativos, quantas oportunidades foram favoritadas e quantas estão no Kanban. Use esses sinais de ativação e uso para decidir quando aumentar o preço.
+
+## 12. Verificação completa
 
 ```powershell
 npm run lint

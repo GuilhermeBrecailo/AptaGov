@@ -2,7 +2,7 @@
 import OpportunityCatalog from '../components/OpportunityCatalog.vue';
 import OpportunityDetails from '../components/OpportunityDetails.vue';
 import OpportunityKanban from '../components/OpportunityKanban.vue';
-import type { AuthPayload, CatalogOpportunity, CatalogPage, FilterConfig, KanbanState, SyncSettings } from '../types';
+import type { AuthPayload, CatalogOpportunity, CatalogPage, FilterConfig, KanbanState, SavedSearch, SyncSettings } from '../types';
 
 const {
   isOnline,
@@ -14,6 +14,9 @@ const { data: auth, error: authError } = await useFetch<AuthPayload>('/api/auth/
 if (authError.value) await navigateTo('/login');
 
 const { data: filters } = await useFetch<FilterConfig>('/api/filters');
+const { data: radarPayload } = await useFetch<{ data: SavedSearch[]; limit: number | null }>('/api/radars', {
+  default: () => ({ data: [], limit: 3 }),
+});
 const { data: status, refresh: refreshStatus } = await useFetch<{ pause: { paused: boolean; reason: string | null }; opportunities: number; automaticSync: SyncSettings }>('/api/status', {
   default: () => ({ pause: { paused: false, reason: null }, opportunities: 0, automaticSync: { enabled: true, intervalMinutes: 10 } }),
 });
@@ -23,15 +26,23 @@ const searchInput = ref('');
 const searchTerm = ref('');
 const stateInput = ref('');
 const selected = ref<CatalogOpportunity | null>(null);
+const selectedRadarId = ref<number | undefined>();
+const sortInput = ref<'score' | 'deadline' | 'publication'>('score');
+const openDeadlineOnly = ref(false);
 const page = ref(1);
 const busy = ref(false);
 const message = ref('');
 const states = ['', 'SP', 'RJ', 'MG', 'PR', 'SC', 'RS', 'GO', 'BA', 'DF'];
+const selectedRadar = computed(() => radarPayload.value?.data.find((radar) => radar.id === selectedRadarId.value));
 
 const query = computed(() => ({
   q: searchTerm.value || undefined,
-  minScore: filters.value?.minimumScore ?? 0,
+  minScore: selectedRadar.value?.filters.minimumScore ?? filters.value?.minimumScore ?? 0,
   state: stateInput.value || undefined,
+  radarId: selectedRadarId.value,
+  sort: sortInput.value,
+  openDeadlineOnly: openDeadlineOnly.value,
+  hideNotRelevant: activeView.value === 'catalog',
   page: page.value,
   pageSize: activeView.value === 'kanban' ? 50 : 20,
   kanbanOnly: activeView.value === 'kanban',
@@ -50,6 +61,11 @@ async function applySearch() {
   await refreshCatalog();
 }
 
+async function selectRadar() {
+  page.value = 1;
+  await refreshCatalog();
+}
+
 async function selectView(view: 'catalog' | 'kanban') {
   activeView.value = view;
   page.value = 1;
@@ -59,6 +75,13 @@ async function selectView(view: 'catalog' | 'kanban') {
 async function addToKanban(item: CatalogOpportunity) {
   await $fetch(`/api/opportunities/${item.id}/kanban`, { method: 'POST' });
   message.value = 'Licitação adicionada ao seu kanban.';
+  await refreshCatalog();
+}
+
+async function updateFeedback(item: CatalogOpportunity, status: 'FAVORITED' | 'NOT_RELEVANT' | null) {
+  await $fetch(`/api/opportunities/${item.id}/feedback`, { method: 'POST', body: { status } });
+  message.value = status === 'FAVORITED' ? 'Oportunidade adicionada às favoritas.' : status === 'NOT_RELEVANT' ? 'Oportunidade retirada do catálogo.' : 'Preferência atualizada.';
+  selected.value = null;
   await refreshCatalog();
 }
 
@@ -72,7 +95,7 @@ async function syncNow() {
   busy.value = true;
   message.value = '';
   try {
-    const result = await $fetch<{ paused: boolean; reason?: string | null }>('/api/sync', { method: 'POST' });
+    const result = await $fetch<{ paused: boolean; reason?: string | null }>('/api/sync', { method: 'POST', body: { radarId: selectedRadarId.value } });
     message.value = result.paused
       ? `Sincronização pausada: ${result.reason ?? 'verifique o status do worker'}.`
       : 'Sincronização concluída.';
@@ -123,13 +146,18 @@ async function logout() {
         <section class="content-surface">
           <div class="search-toolbar"><div class="search-box"><span>⌕</span><input v-model="searchInput" aria-label="Pesquisar licitações" placeholder="Pesquisar licitações por título, órgão ou descrição" @keyup.enter="applySearch"><button class="search-submit" @click="applySearch">Pesquisar</button></div><select v-model="stateInput" aria-label="Filtrar por estado" @change="applySearch"><option v-for="state in states" :key="state" :value="state">{{ state || 'Todos os estados' }}</option></select><span class="result-count">{{ catalog?.total ?? 0 }} resultados</span></div>
           <div class="list-heading"><div><span class="section-kicker">Catálogo PNCP</span><h2>Escolha o que entra no seu pipeline</h2></div><span class="pagination-label">Página {{ catalog?.page ?? 1 }} de {{ catalog?.totalPages ?? 1 }}</span></div>
-          <OpportunityCatalog :items="items" :loading="catalogLoading" @select="selected = $event" @add="addToKanban" />
+          <div class="catalog-filters" aria-label="Filtros rápidos">
+            <label class="quick-filter"><span>Radar</span><select v-model.number="selectedRadarId" @change="selectRadar"><option :value="undefined">Todos os radares</option><option v-for="radar in radarPayload?.data" :key="radar.id" :value="radar.id">{{ radar.name }}{{ radar.enabled ? '' : ' (pausado)' }}</option></select></label>
+            <label class="quick-filter"><span>Ordenar por</span><select v-model="sortInput" @change="applySearch"><option value="score">Maior aderência</option><option value="deadline">Prazo mais próximo</option><option value="publication">Mais recentes</option></select></label>
+            <label class="quick-check"><input v-model="openDeadlineOnly" type="checkbox" @change="applySearch"><span>Somente com prazo aberto</span></label>
+          </div>
+          <OpportunityCatalog :items="items" :loading="catalogLoading" @select="selected = $event" @add="addToKanban" @feedback="updateFeedback" />
           <div class="pagination"><button class="btn btn-ghost" :disabled="(catalog?.page ?? 1) <= 1" @click="page -= 1">← Anterior</button><span>{{ catalog?.page ?? 1 }} / {{ catalog?.totalPages ?? 1 }}</span><button class="btn btn-ghost" :disabled="(catalog?.page ?? 1) >= (catalog?.totalPages ?? 1)" @click="page += 1">Próxima →</button></div>
         </section>
       </div>
 
       <section v-else class="kanban-surface"><div class="list-heading"><div><span class="section-kicker">Pipeline da empresa</span><h2>Do interesse à decisão</h2></div><button class="btn btn-ghost" @click="selectView('catalog')">+ Buscar licitações</button></div><OpportunityKanban :items="items" :loading="catalogLoading" @select="selected = $event" @change-state="changeState" /></section>
     </main>
-    <OpportunityDetails :item="selected" @close="selected = null" />
+    <OpportunityDetails :item="selected" @close="selected = null" @feedback="updateFeedback(selected!, $event)" />
   </div>
 </template>

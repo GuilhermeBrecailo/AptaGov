@@ -37,6 +37,17 @@ export class OrganizationRepository {
     return row ? mapRow(row) : undefined;
   }
 
+  onboardingCompletedAt(organizationId: number): string | null | undefined {
+    const row = this.db.prepare('SELECT onboarding_completed_at FROM organizations WHERE id = ?')
+      .get(organizationId) as { onboarding_completed_at: string | null } | undefined;
+    return row?.onboarding_completed_at;
+  }
+
+  markOnboardingCompleted(organizationId: number, completedAt = new Date().toISOString()): void {
+    this.db.prepare('UPDATE organizations SET onboarding_completed_at = ?, updated_at = ? WHERE id = ?')
+      .run(completedAt, completedAt, organizationId);
+  }
+
   addMember(organizationId: number, userId: number, role: OrganizationRole): void {
     this.db.prepare(`
       INSERT INTO organization_memberships (organization_id, user_id, role, created_at)

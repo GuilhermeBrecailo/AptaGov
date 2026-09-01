@@ -64,7 +64,7 @@ onBeforeUnmount(() => globalThis.removeEventListener('keydown', handleKeydown));
           </NuxtLink>
           <NuxtLink class="nav-drawer-link" to="/configuracao" exact-active-class="active" @click="close">
             <span class="nav-drawer-icon">⚙</span>
-            <span><strong>Configuração</strong><small>Filtros, score e notificações</small></span>
+            <span><strong>Configuração</strong><small>Radares, filtros e notificações</small></span>
           </NuxtLink>
           <NuxtLink class="nav-drawer-link" to="/plano" exact-active-class="active" @click="close">
             <span class="nav-drawer-icon">◇</span>
