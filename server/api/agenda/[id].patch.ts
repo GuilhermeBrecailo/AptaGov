@@ -17,7 +17,7 @@ export async function handleAgendaPatch(input: {
     throw createError({ statusCode: 400, statusMessage: 'Atualização de lembrete inválida' });
   }
   const reminder = (input.service ?? new AgendaService(input.db)).update(input.organizationId, input.reminderId, input.body);
-  if (!reminder) throw createError({ statusCode: 404, statusMessage: 'Lembrete não encontrado' });
+  if (!reminder) throw createError({ statusCode: 404, message: 'Lembrete não encontrado' });
   return reminder;
 }
 

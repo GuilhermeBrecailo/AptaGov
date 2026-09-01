@@ -3,8 +3,13 @@ import { createTestDatabase } from '../../src/db/database';
 import { OrganizationRepository } from '../../src/repositories/organizationRepository';
 import { OpportunityRepository } from '../../src/repositories/opportunityRepository';
 import { OpportunityChangeRepository } from '../../src/repositories/opportunityChangeRepository';
+import { OpportunityReminderRepository } from '../../src/repositories/opportunityReminderRepository';
+import { NotificationRepository } from '../../src/repositories/notificationRepository';
+import { UserRepository } from '../../src/repositories/userRepository';
 import { syncRecords } from '../../src/services/syncService';
 import { OpportunityChangeService } from '../../src/services/opportunityChangeService';
+import { OperationalSyncService } from '../../src/services/operationalSyncService';
+import { PushNotificationService } from '../../src/services/pushNotificationService';
 
 function buildRecord(overrides: Partial<Parameters<OpportunityRepository['insert']>[0]> & { pncpId: string }) {
   return {
@@ -31,6 +36,45 @@ function buildRecord(overrides: Partial<Parameters<OpportunityRepository['insert
 }
 
 describe('detecção de mudanças oficiais', () => {
+  it('ativa changes, reminders e alertas idempotentes durante o sync atual', async () => {
+    const db = createTestDatabase();
+    const organizations = new OrganizationRepository(db);
+    const opportunities = new OpportunityRepository(db);
+    const user = new UserRepository(db).create({ name: 'Bia', email: 'bia@sync.test', passwordHash: 'hash' });
+    const organization = organizations.create('Empresa Sync Operacional');
+    organizations.addMember(organization.id, user.id, 'OWNER');
+    new NotificationRepository(db).saveSettings(organization.id, { enabled: true, email: user.email });
+    const push = new PushNotificationService(db);
+    push.registerSubscription(user.id, {
+      endpoint: 'https://push.example.test/sync-operational',
+      expirationTime: null,
+      keys: { p256dh: 'p256dh-key', auth: 'auth-key' },
+    });
+
+    const initial = await syncRecords([buildRecord({ pncpId: 'change-sync-operational' })], opportunities);
+    const opportunityId = initial.entries[0]!.current.opportunityId;
+    opportunities.addToKanban(organization.id, opportunityId);
+    const operational = new OperationalSyncService(db);
+    const hooks = { onEntry: (entry: Parameters<OperationalSyncService['processEntry']>[0]) => operational.processEntry(entry) };
+    const changedRecord = buildRecord({
+      pncpId: 'change-sync-operational',
+      biddingDeadline: '2026-09-12T18:00:00.000Z',
+    });
+
+    await syncRecords([changedRecord], opportunities, hooks);
+    await syncRecords([changedRecord], opportunities, hooks);
+
+    expect(new OpportunityChangeRepository(db).listForOrganization(organization.id, opportunityId)).toMatchObject([
+      { type: 'PROPOSAL_DEADLINE' },
+    ]);
+    expect(new Set(new OpportunityReminderRepository(db).listForOpportunity(organization.id, opportunityId)
+      .map((reminder) => reminder.type))).toEqual(new Set(['BID_DEADLINE', 'MEETING', 'FOLLOW_UP']));
+    expect(new NotificationRepository(db).list(organization.id)).toMatchObject([
+      { eventKey: expect.stringMatching(`^opportunity-change:${organization.id}:${opportunityId}:`) },
+    ]);
+    expect(push.pendingCount()).toBe(1);
+  });
+
   it('não emite evento quando o snapshot relevante não muda', async () => {
     const db = createTestDatabase();
     const repository = new OpportunityRepository(db);

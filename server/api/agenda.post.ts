@@ -33,7 +33,7 @@ export async function handleAgendaPost(input: {
     dueAt: body.dueAt,
     note: body.note,
   });
-  if (!reminder) throw createError({ statusCode: 404, statusMessage: 'Licitação não encontrada' });
+  if (!reminder) throw createError({ statusCode: 404, message: 'Licitação não encontrada' });
   return reminder;
 }
 

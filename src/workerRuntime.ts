@@ -10,7 +10,7 @@ import { OrganizationRepository } from './repositories/organizationRepository';
 import { SystemStateRepository } from './repositories/systemStateRepository';
 import { createDatabaseBackup } from './services/backupService';
 import { classifyOpportunities, classifyOrganizationOpportunities } from './services/scoring/classificationService';
-import { syncFromPncp } from './services/syncService';
+import { syncFromPncp, type SyncHooks } from './services/syncService';
 import { NotificationService } from './services/notificationService';
 import { ResendEmailNotifier } from './integrations/notifications/ResendEmailNotifier';
 import { PushNotificationService } from './services/pushNotificationService';
@@ -23,6 +23,7 @@ import { shouldRunSync, type SyncMode } from './services/syncPolicy';
 import { SavedSearchRepository } from './repositories/savedSearchRepository';
 import { runSelectedRadars } from './services/radarSyncService';
 import { selectRadarsForNotifications } from './services/savedSearchService';
+import { OperationalSyncService } from './services/operationalSyncService';
 
 export interface WorkerCycleResult {
   paused: boolean;
@@ -49,6 +50,7 @@ export class WorkerRuntime {
   readonly pushNotifications: PushNotificationService;
   readonly billing: BillingService;
   readonly syncSettings: OrganizationSyncSettingsRepository;
+  private readonly syncHooks: SyncHooks;
 
   constructor(private readonly env: AppEnv = loadEnv(), db?: SqliteDatabase) {
     this.db = db ?? createDatabase(env.databaseUrl);
@@ -59,6 +61,8 @@ export class WorkerRuntime {
     this.pushNotifications = new PushNotificationService(this.db);
     this.billing = new BillingService(this.db, { trialDays: env.billingTrialDays });
     this.syncSettings = new OrganizationSyncSettingsRepository(this.db);
+    const operationalSync = new OperationalSyncService(this.db);
+    this.syncHooks = { onEntry: (entry) => operationalSync.processEntry(entry) };
     this.pncp = new PncpClient({ baseUrl: env.pncpBaseUrl, timeoutMs: env.pncpTimeoutMs, maxRetries: env.pncpMaxRetries });
     this.openData = new OpenDataClient({ baseUrl: env.openDataBaseUrl, timeoutMs: env.pncpTimeoutMs, maxRetries: env.pncpMaxRetries });
   }
@@ -93,7 +97,7 @@ export class WorkerRuntime {
             radars,
             mode,
             options.radarId,
-            (radar) => syncFromPncp([this.pncp, this.openData], this.opportunities, radar.filters),
+            (radar) => syncFromPncp([this.pncp, this.openData], this.opportunities, radar.filters, new Date(), this.syncHooks),
             (radar, runAt, lastMatchAt) => savedSearches.markRun(organization.id, radar.id, runAt, lastMatchAt),
           );
           syncResult.received += result.received;
@@ -102,7 +106,7 @@ export class WorkerRuntime {
           continue;
         }
         const filters = organizationFilters.find(organization.id) ?? defaultFilters;
-        const result = await syncFromPncp([this.pncp, this.openData], this.opportunities, filters);
+        const result = await syncFromPncp([this.pncp, this.openData], this.opportunities, filters, new Date(), this.syncHooks);
         syncResult.received += result.received;
         syncResult.created += result.created;
         syncResult.updated += result.updated;

@@ -46,6 +46,7 @@ export class OpportunityReminderRepository {
   private readonly findIdempotentStatement;
   private readonly listStatement;
   private readonly listForOpportunityStatement;
+  private readonly hasOpportunityScopeStatement;
   private readonly insertStatement;
   private readonly updateStatement;
   private readonly createTransaction;
@@ -65,6 +66,18 @@ export class OpportunityReminderRepository {
       SELECT * FROM opportunity_reminders
       WHERE organization_id = ? AND opportunity_id = ?
       ORDER BY due_at ASC, id ASC
+    `);
+    this.hasOpportunityScopeStatement = db.prepare(`
+      SELECT 1
+      WHERE EXISTS (
+        SELECT 1
+        FROM organization_opportunities
+        WHERE organization_id = ? AND opportunity_id = ?
+      ) OR EXISTS (
+        SELECT 1
+        FROM opportunity_reminders
+        WHERE organization_id = ? AND opportunity_id = ?
+      )
     `);
     this.insertStatement = db.prepare(`
       INSERT INTO opportunity_reminders (
@@ -113,13 +126,14 @@ export class OpportunityReminderRepository {
     return rows.map(mapRow);
   }
 
-  create(input: OpportunityReminderCreateInput): OpportunityReminder {
+  create(input: OpportunityReminderCreateInput): OpportunityReminder | undefined {
+    if (!this.hasOpportunityScope(input.organizationId, input.opportunityId)) return undefined;
     return this.createTransaction(input);
   }
 
   update(organizationId: number, id: number, patch: OpportunityReminderPatch): OpportunityReminder | undefined {
     const current = this.find(organizationId, id);
-    if (!current) return undefined;
+    if (!current || !this.hasOpportunityScope(organizationId, current.opportunityId)) return undefined;
     const nextStatus = patch.status ?? current.status;
     this.updateStatement.run({
       organizationId,
@@ -137,6 +151,10 @@ export class OpportunityReminderRepository {
   findIdempotent(organizationId: number, opportunityId: number, type: ReminderType, dueAt: string): OpportunityReminder | undefined {
     const row = this.findIdempotentStatement.get(organizationId, opportunityId, type, dueAt) as OpportunityReminderRow | undefined;
     return row ? mapRow(row) : undefined;
+  }
+
+  hasOpportunityScope(organizationId: number, opportunityId: number): boolean {
+    return Boolean(this.hasOpportunityScopeStatement.get(organizationId, opportunityId, organizationId, opportunityId));
   }
 
   private find(organizationId: number, id: number): OpportunityReminder | undefined {

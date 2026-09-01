@@ -25,16 +25,28 @@ export interface SyncResult {
   }>;
 }
 
-export async function syncRecords(records: OpportunityInput[], repository: OpportunityRepository): Promise<SyncResult> {
+export type SyncEntry = SyncResult['entries'][number];
+
+export interface SyncHooks {
+  onEntry?: (entry: SyncEntry) => void | Promise<void>;
+}
+
+export async function syncRecords(
+  records: OpportunityInput[],
+  repository: OpportunityRepository,
+  hooks: SyncHooks = {},
+): Promise<SyncResult> {
   let created = 0;
   let updated = 0;
   const entries: SyncResult['entries'] = [];
   for (const record of records) {
     const result = repository.upsert(record);
-    entries.push({
+    const entry: SyncEntry = {
       previous: result.previous ? normalizeOpportunitySnapshot(result.previous) : undefined,
       current: normalizeOpportunitySnapshot(result.current),
-    });
+    };
+    entries.push(entry);
+    await hooks.onEntry?.(entry);
     if (result.created) {
       created += 1;
     } else {
@@ -44,7 +56,13 @@ export async function syncRecords(records: OpportunityInput[], repository: Oppor
   return { received: records.length, created, updated, entries };
 }
 
-export async function syncFromPncp(client: PncpSyncClient | PncpSyncClient[], repository: OpportunityRepository, filters: FilterConfig, today = new Date()): Promise<SyncResult> {
+export async function syncFromPncp(
+  client: PncpSyncClient | PncpSyncClient[],
+  repository: OpportunityRepository,
+  filters: FilterConfig,
+  today = new Date(),
+  hooks: SyncHooks = {},
+): Promise<SyncResult> {
   const end = formatDate(today);
   const startDate = new Date(today);
   startDate.setUTCDate(startDate.getUTCDate() - filters.lookbackDays);
@@ -80,7 +98,7 @@ export async function syncFromPncp(client: PncpSyncClient | PncpSyncClient[], re
       }
     }
   }
-  return syncRecords(deduplicateByPncpId(records), repository);
+  return syncRecords(deduplicateByPncpId(records), repository, hooks);
 }
 
 function isSuccessfulSourceResult(

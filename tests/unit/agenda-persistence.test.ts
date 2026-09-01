@@ -7,6 +7,7 @@ import { OrganizationRepository } from '../../src/repositories/organizationRepos
 import { OpportunityRepository } from '../../src/repositories/opportunityRepository';
 import { OpportunityChangeRepository } from '../../src/repositories/opportunityChangeRepository';
 import { OpportunityReminderRepository } from '../../src/repositories/opportunityReminderRepository';
+import { OrganizationAlertPreferenceRepository } from '../../src/repositories/organizationAlertPreferenceRepository';
 
 function createOpportunity(db: ReturnType<typeof createTestDatabase>, pncpId: string): number {
   return new OpportunityRepository(db).insert({
@@ -23,6 +24,29 @@ function createOpportunity(db: ReturnType<typeof createTestDatabase>, pncpId: st
 }
 
 describe('persistência de agenda operacional', () => {
+  it('usa defaults ativos e persiste preferências de alertas por organização', () => {
+    const db = createTestDatabase();
+    const organization = new OrganizationRepository(db).create('Empresa Preferências');
+    const repository = new OrganizationAlertPreferenceRepository(db);
+
+    expect(repository.find(organization.id)).toEqual({
+      organizationId: organization.id,
+      proposalDeadline: true,
+      sessionOpening: true,
+      disputeStart: true,
+    });
+    expect(repository.save(organization.id, {
+      proposalDeadline: true,
+      sessionOpening: false,
+      disputeStart: false,
+    })).toEqual({
+      organizationId: organization.id,
+      proposalDeadline: true,
+      sessionOpening: false,
+      disputeStart: false,
+    });
+  });
+
   it('migra eventos legados convergentes sem perder eventos ou leituras', () => {
     const db = new Database(':memory:');
     db.pragma('foreign_keys = ON');
@@ -61,6 +85,7 @@ describe('persistência de agenda operacional', () => {
     const db = createTestDatabase();
     const organization = new OrganizationRepository(db).create('Empresa Agenda');
     const opportunityId = createOpportunity(db, 'agenda-1');
+    new OpportunityRepository(db).addToKanban(organization.id, opportunityId);
     const repository = new OpportunityReminderRepository(db);
 
     repository.create({
@@ -99,6 +124,8 @@ describe('persistência de agenda operacional', () => {
     const first = organizations.create('Empresa Operação A');
     const second = organizations.create('Empresa Operação B');
     const opportunityId = createOpportunity(db, 'agenda-2');
+    new OpportunityRepository(db).addToKanban(first.id, opportunityId);
+    new OpportunityRepository(db).addToKanban(second.id, opportunityId);
     const repository = new OpportunityReminderRepository(db);
     const firstReminder = repository.create({
       organizationId: first.id,
@@ -109,7 +136,7 @@ describe('persistência de agenda operacional', () => {
       status: 'PENDING',
       note: null,
       createdByUserId: null,
-    });
+    })!;
     repository.create({
       organizationId: second.id,
       opportunityId,
@@ -154,6 +181,26 @@ describe('persistência de agenda operacional', () => {
       organizationId: second.id,
       status: 'PENDING',
     });
+  });
+
+  it('rejeita persistência de lembrete sem vínculo operacional da organização', () => {
+    const db = createTestDatabase();
+    const organizations = new OrganizationRepository(db);
+    const first = organizations.create('Empresa Escopo A');
+    const second = organizations.create('Empresa Escopo B');
+    const opportunityId = createOpportunity(db, 'agenda-scope');
+    const opportunities = new OpportunityRepository(db);
+    const repository = new OpportunityReminderRepository(db);
+    opportunities.addToKanban(first.id, opportunityId);
+
+    expect(repository.create({
+      organizationId: second.id,
+      opportunityId,
+      type: 'FOLLOW_UP',
+      title: 'Tentativa sem vínculo',
+      dueAt: '2026-09-08T15:00:00.000Z',
+      createdByUserId: null,
+    })).toBeUndefined();
   });
 
   it('deduplica eventos de mudança por fingerprint e marca leitura só na organização dona', () => {
@@ -259,8 +306,12 @@ describe('persistência de agenda operacional', () => {
     const first = organizations.create('Empresa Reminder A');
     const second = organizations.create('Empresa Reminder B');
     const opportunityId = createOpportunity(db, 'agenda-6');
+    const opportunities = new OpportunityRepository(db);
     const reminders = new OpportunityReminderRepository(db);
     const changeRepository = new OpportunityChangeRepository(db);
+
+    opportunities.addToKanban(first.id, opportunityId);
+    opportunities.addToKanban(second.id, opportunityId);
 
     reminders.create({
       organizationId: first.id,
@@ -282,6 +333,7 @@ describe('persistência de agenda operacional', () => {
       note: null,
       createdByUserId: null,
     });
+    db.prepare('DELETE FROM organization_opportunities WHERE opportunity_id = ?').run(opportunityId);
 
     const { event } = changeRepository.record({
       opportunityId,

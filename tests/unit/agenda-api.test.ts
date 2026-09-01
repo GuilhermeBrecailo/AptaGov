@@ -7,6 +7,8 @@ import { OpportunityChangeRepository } from '../../src/repositories/opportunityC
 import { OpportunityRepository } from '../../src/repositories/opportunityRepository';
 import { OpportunityReminderRepository } from '../../src/repositories/opportunityReminderRepository';
 import { UserRepository } from '../../src/repositories/userRepository';
+import { handleAlertPreferencesGet } from '../../server/api/alert-preferences.get';
+import { handleAlertPreferencesPut } from '../../server/api/alert-preferences.put';
 import { AgendaService } from '../../src/services/agendaService';
 import { syncRecords } from '../../src/services/syncService';
 import { handleAgendaGet } from '../../server/api/agenda.get';
@@ -51,6 +53,7 @@ describe('agenda e histórico operacional via handlers', () => {
     };
 
     const initial = await syncRecords([{ ...base, biddingDeadline: '2026-09-10T18:00:00.000Z' }], repository);
+    repository.addToKanban(organization.id, initial.entries[0]!.current.opportunityId);
     const firstRun = agenda.scheduleOfficialReminders(organization.id, initial.entries[0]!.previous, initial.entries[0]!.current);
     expect(firstRun.map((item) => [item.type, item.dueAt])).toEqual([
       ['BID_DEADLINE', '2026-09-10T18:00:00.000Z'],
@@ -78,6 +81,7 @@ describe('agenda e histórico operacional via handlers', () => {
     const organization = organizations.create('Empresa Agenda API');
     organizations.addMember(organization.id, user.id, 'OWNER');
     const opportunityId = createOpportunity(db, 'agenda-api-1');
+    new OpportunityRepository(db).addToKanban(organization.id, opportunityId);
 
     const created = await handleAgendaPost({
       service: undefined,
@@ -125,6 +129,100 @@ describe('agenda e histórico operacional via handlers', () => {
       status: 'COMPLETED',
       completedAt: '2026-09-05T11:00:00.000Z',
     });
+  });
+
+  it('rejeita create, update e schedule fora do escopo da organização', async () => {
+    const db = createTestDatabase();
+    const organizations = new OrganizationRepository(db);
+    const opportunities = new OpportunityRepository(db);
+    const users = new UserRepository(db);
+    const firstUser = users.create({ name: 'Dani', email: 'dani@agenda.test', passwordHash: 'hash' });
+    const secondUser = users.create({ name: 'Eva', email: 'eva@agenda.test', passwordHash: 'hash' });
+    const first = organizations.create('Empresa Agenda Isolada A');
+    const second = organizations.create('Empresa Agenda Isolada B');
+    organizations.addMember(first.id, firstUser.id, 'OWNER');
+    organizations.addMember(second.id, secondUser.id, 'OWNER');
+    const synced = await syncRecords([{
+      pncpId: 'agenda-tenant-isolation',
+      title: 'Oportunidade isolada',
+      description: '',
+      organization: 'Prefeitura Exemplo',
+      state: 'SP',
+      sourceUrl: 'https://pncp.gov.br/agenda-tenant-isolation',
+      publicationDate: '2026-09-01T10:00:00.000Z',
+      biddingDeadline: '2026-09-10T18:00:00.000Z',
+      estimatedValueCents: 150_000,
+    }], opportunities);
+    const entry = synced.entries[0]!;
+    opportunities.addToKanban(first.id, entry.current.opportunityId);
+    const agenda = new AgendaService(db);
+    const [firstReminder] = agenda.scheduleOfficialReminders(first.id, entry.previous, entry.current);
+
+    expect(agenda.scheduleOfficialReminders(second.id, entry.previous, entry.current)).toEqual([]);
+    await expect(handleAgendaPost({
+      service: agenda,
+      db,
+      organizationId: second.id,
+      userId: secondUser.id,
+      body: {
+        opportunityId: entry.current.opportunityId,
+        type: 'FOLLOW_UP',
+        title: 'Tentativa cruzada',
+        dueAt: '2026-09-08T14:00:00.000Z',
+      },
+    })).rejects.toMatchObject({ statusCode: 404 });
+    await expect(handleAgendaPatch({
+      service: agenda,
+      db,
+      organizationId: second.id,
+      reminderId: firstReminder!.id,
+      body: { status: 'COMPLETED' },
+    })).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it('aplica preferências organizacionais e permite ajuste por GET e PUT', async () => {
+    const db = createTestDatabase();
+    const organizations = new OrganizationRepository(db);
+    const opportunities = new OpportunityRepository(db);
+    const organization = organizations.create('Empresa Preferências API');
+    const synced = await syncRecords([{
+      pncpId: 'agenda-preferences-api',
+      title: 'Oportunidade preferências',
+      description: '',
+      organization: 'Prefeitura Exemplo',
+      state: 'SP',
+      sourceUrl: 'https://pncp.gov.br/agenda-preferences-api',
+      publicationDate: '2026-09-01T10:00:00.000Z',
+      biddingDeadline: '2026-09-10T18:00:00.000Z',
+      estimatedValueCents: 150_000,
+      raw: {
+        dataAberturaSessaoPublica: '2026-09-11T09:00:00.000Z',
+        dataInicioDisputa: '2026-09-11T09:30:00.000Z',
+      },
+    }], opportunities);
+    const entry = synced.entries[0]!;
+    opportunities.addToKanban(organization.id, entry.current.opportunityId);
+
+    expect(handleAlertPreferencesGet({ db, organizationId: organization.id })).toMatchObject({
+      proposalDeadline: true,
+      sessionOpening: true,
+      disputeStart: true,
+    });
+    expect(await handleAlertPreferencesPut({
+      db,
+      organizationId: organization.id,
+      body: {
+        proposalDeadline: true,
+        sessionOpening: false,
+        disputeStart: false,
+      },
+    })).toMatchObject({
+      proposalDeadline: true,
+      sessionOpening: false,
+      disputeStart: false,
+    });
+    expect(new AgendaService(db).scheduleOfficialReminders(organization.id, entry.previous, entry.current)
+      .map((reminder) => reminder.type)).toEqual(['BID_DEADLINE']);
   });
 
   it('lista mudanças visíveis e marca leitura no escopo correto', async () => {
@@ -180,5 +278,7 @@ describe('agenda e histórico operacional via handlers', () => {
     expect(readFileSync(resolve(root, 'agenda/[id].patch.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
     expect(readFileSync(resolve(root, 'opportunities/[id]/changes.get.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
     expect(readFileSync(resolve(root, 'opportunities/[id]/changes/[changeId]/read.patch.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
+    expect(readFileSync(resolve(root, 'alert-preferences.get.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
+    expect(readFileSync(resolve(root, 'alert-preferences.put.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
   });
 });
