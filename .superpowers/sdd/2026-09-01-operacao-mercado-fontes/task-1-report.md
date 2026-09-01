@@ -189,3 +189,72 @@ Tests  4 passed (4)
 ### Commit do fix
 
 - `7fc9b33` - `fix: isolate change event reads per organization`
+
+## Fix round 2
+
+### Achados corrigidos
+
+- A visibilidade de `change events` voltou a incluir organizações vinculadas só por `opportunity_reminders`.
+- O estado de leitura continuou independente por organização para o mesmo evento.
+
+### Arquivos alterados no fix
+
+- `migrations/016_opportunity_change_reads.sql`
+- `src/repositories/opportunityChangeRepository.ts`
+- `tests/unit/agenda-persistence.test.ts`
+
+### Decisões do fix
+
+- Mantive o estado de leitura por organização em `opportunity_change_event_reads`; o ajuste foi apenas na regra de vínculo visível.
+- `listForOrganization` e `markRead` agora aceitam três formas de vínculo da organização com a oportunidade: `organization_opportunities`, `opportunity_reminders` e `opportunity_feedback` com status `FAVORITED`.
+- O backfill da migration `016` passou a copiar o `read_at` legado também para organizações vinculadas por `opportunity_reminders`.
+
+### Comandos executados e saídas do fix
+
+#### 1. Vermelho do teste de regressão reminder-only
+
+Comando:
+
+```text
+rtk npm --prefix 'C:\Users\user\Documents\dev\licitacoes-pncp' test -- --run tests/unit/agenda-persistence.test.ts
+```
+
+Saída:
+
+```text
+> vitest run --run tests/unit/agenda-persistence.test.ts
+RUN  v3.2.7 C:/Users/user/Documents/dev/licitacoes-pncp
+❯ tests/unit/agenda-persistence.test.ts (5 tests | 1 failed) 56ms
+× persistência de agenda operacional > mantém evento visível e leitura independente para organização vinculada só por lembrete
+→ expected [] to match object [ { id: 1, readAt: null } ]
+```
+
+Leitura: a query ignorava vínculo por lembrete, então a organização reminder-only não via o evento.
+
+#### 2. Verde final do fix
+
+Comandos:
+
+```text
+rtk npm --prefix 'C:\Users\user\Documents\dev\licitacoes-pncp' test -- --run tests/unit/agenda-persistence.test.ts
+rtk npm --prefix 'C:\Users\user\Documents\dev\licitacoes-pncp' run typecheck
+```
+
+Saídas:
+
+```text
+> vitest run --run tests/unit/agenda-persistence.test.ts
+RUN  v3.2.7 C:/Users/user/Documents/dev/licitacoes-pncp
+✓ tests/unit/agenda-persistence.test.ts (5 tests) 49ms
+Test Files  1 passed (1)
+Tests  5 passed (5)
+```
+
+```text
+> nuxt prepare && tsc --noEmit
+* Types generated in .nuxt.
+```
+
+### Commit do fix
+
+- `f69cc82` - `fix: restore reminder-backed change visibility`
