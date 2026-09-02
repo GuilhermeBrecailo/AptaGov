@@ -44,6 +44,66 @@ export interface CatalogPage {
   totalPages: number;
 }
 
+export type MarketDataState = 'READY' | 'INSUFFICIENT_DATA';
+
+export interface MarketBreakdown {
+  label: string;
+  count: number;
+}
+
+export interface MarketSourceLink {
+  sourceCode: SourceId;
+  sourceLabel: string;
+  url: string;
+  externalId: string;
+  observedAt: string;
+  recordType: 'OBSERVATION' | 'RESULT';
+}
+
+export interface MarketMonthlySeries {
+  month: string;
+  count: number;
+  medianPriceCents: number | null;
+}
+
+export interface MarketSummary {
+  state: MarketDataState;
+  message: string | null;
+  minimumObservations: number;
+  observationCount: number;
+  count: number;
+  minPriceCents: number | null;
+  medianPriceCents: number | null;
+  maxPriceCents: number | null;
+  min: number | null;
+  median: number | null;
+  max: number | null;
+  monthlySeries: MarketMonthlySeries[];
+  purchaseCount: number;
+  topOrganizations: MarketBreakdown[];
+  topRegions: MarketBreakdown[];
+  modalityBreakdown: MarketBreakdown[];
+  statusBreakdown: MarketBreakdown[];
+  lastUpdatedAt: string | null;
+  lastUpdate: string | null;
+  sourceLinks: MarketSourceLink[];
+  auditLinks: MarketSourceLink[];
+}
+
+export interface MarketIdentity {
+  itemCode: string | null;
+  normalizedDescription: string | null;
+  unit: string | null;
+}
+
+export interface OpportunityMarketPayload {
+  opportunityId: number;
+  identity: MarketIdentity;
+  state: MarketDataState;
+  comparison: MarketSummary | null;
+  message: string | null;
+}
+
 export interface FilterConfig {
   lookbackDays: number;
   states: string[];

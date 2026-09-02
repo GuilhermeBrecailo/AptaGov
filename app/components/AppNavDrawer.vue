@@ -4,7 +4,7 @@ import type { AuthPayload } from '../types';
 
 defineProps<{
   auth?: AuthPayload | null;
-  active?: 'panel' | 'agenda' | 'configuration' | 'plan' | 'admin';
+  active?: 'panel' | 'agenda' | 'market' | 'configuration' | 'plan' | 'admin';
 }>();
 
 const emit = defineEmits<{ logout: [] }>();
@@ -65,6 +65,10 @@ onBeforeUnmount(() => globalThis.removeEventListener('keydown', handleKeydown));
           <NuxtLink class="nav-drawer-link" to="/agenda" exact-active-class="active" @click="close">
             <span class="nav-drawer-icon">▤</span>
             <span><strong>Agenda</strong><small>Prazos, sessões e lembretes</small></span>
+          </NuxtLink>
+          <NuxtLink class="nav-drawer-link" to="/mercado" exact-active-class="active" @click="close">
+            <span class="nav-drawer-icon">M</span>
+            <span><strong>Mercado</strong><small>Preços, compras e fontes oficiais</small></span>
           </NuxtLink>
           <NuxtLink class="nav-drawer-link" to="/configuracao" exact-active-class="active" @click="close">
             <span class="nav-drawer-icon">⚙</span>

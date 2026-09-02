@@ -1,14 +1,37 @@
 <script setup lang="ts">
+import { watch } from 'vue';
 import OpportunityChecklist from './OpportunityChecklist.vue';
-import type { CatalogOpportunity, ChecklistPatchInput, ChecklistItem } from '../types';
+import MarketSummary from './MarketSummary.vue';
+import type { CatalogOpportunity, ChecklistPatchInput, ChecklistItem, OpportunityMarketPayload } from '../types';
 
-defineProps<{
+const props = defineProps<{
   item: CatalogOpportunity | null;
   checklistItems?: ChecklistItem[];
   checklistLoading?: boolean;
   checklistSaving?: boolean;
   currentUser?: { id: number; name: string } | null;
 }>();
+
+const market = ref<OpportunityMarketPayload | null>(null);
+const marketLoading = ref(false);
+const marketError = ref<string | null>(null);
+let marketRequest = 0;
+
+watch(() => props.item?.id, async (opportunityId) => {
+  const request = ++marketRequest;
+  market.value = null;
+  marketError.value = null;
+  if (!opportunityId) return;
+  marketLoading.value = true;
+  try {
+    const response = await $fetch<OpportunityMarketPayload>(`/api/opportunities/${opportunityId}/market`);
+    if (request === marketRequest) market.value = response;
+  } catch {
+    if (request === marketRequest) marketError.value = 'Dados insuficientes para comparação';
+  } finally {
+    if (request === marketRequest) marketLoading.value = false;
+  }
+}, { immediate: true });
 const emit = defineEmits<{
   close: [];
   feedback: [status: 'FAVORITED' | 'NOT_RELEVANT' | null];
@@ -39,6 +62,13 @@ function scoreLabel(value: string): string {
       <h2>{{ item.title }}</h2>
       <p class="details-organization">{{ item.organization }}{{ item.city ? ` · ${item.city}` : '' }}</p>
       <div class="details-grid"><div><small>Publicação</small><strong>{{ date(item.publicationDate) }}</strong></div><div><small>Prazo</small><strong>{{ date(item.biddingDeadline) }}</strong></div><div><small>Valor estimado</small><strong>{{ item.estimatedValueCents ? money(item.estimatedValueCents) : 'Não informado' }}</strong></div></div>
+      <MarketSummary
+        :summary="market?.comparison ?? null"
+        :state="market?.state"
+        :message="market?.message ?? marketError"
+        :loading="marketLoading"
+        compact
+      />
       <OpportunityChecklist
         v-if="item.inKanban"
         :items="checklistItems ?? []"

@@ -23,6 +23,12 @@ const envSchema = z.object({
   BILLING_MONTHLY_PRICE_CENTS: z.coerce.number().int().positive().default(5_000),
   BILLING_TRIAL_DAYS: z.coerce.number().int().min(0).default(14),
   BILLING_PLANS_JSON: z.string().default(JSON.stringify(defaultBillingPlans)),
+  MARKET_MIN_OBSERVATIONS: z.coerce.number().int().positive().default(5),
+  MARKET_LOOKBACK_DAYS: z.coerce.number().int().positive().default(365),
+  BEC_SP_ENABLED: z.preprocess(
+    (value) => typeof value === 'string' ? ['true', '1', 'yes', 'on'].includes(value.trim().toLowerCase()) : value,
+    z.boolean().default(false),
+  ),
   PLATFORM_ADMIN_EMAILS: z.string().default(''),
 });
 
@@ -47,6 +53,9 @@ export interface AppEnv {
   billingMonthlyPriceCents: number;
   billingTrialDays: number;
   billingPlans: BillingPlanDefinition[];
+  marketMinObservations: number;
+  marketLookbackDays: number;
+  becSpEnabled: boolean;
   platformAdminEmails: string[];
 }
 
@@ -73,6 +82,9 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     billingMonthlyPriceCents: parsed.BILLING_MONTHLY_PRICE_CENTS,
     billingTrialDays: parsed.BILLING_TRIAL_DAYS,
     billingPlans: parseBillingPlans(parsed.BILLING_PLANS_JSON),
+    marketMinObservations: parsed.MARKET_MIN_OBSERVATIONS,
+    marketLookbackDays: parsed.MARKET_LOOKBACK_DAYS,
+    becSpEnabled: parsed.BEC_SP_ENABLED,
     platformAdminEmails: parsed.PLATFORM_ADMIN_EMAILS.split(',').map((email) => email.trim().toLowerCase()).filter(Boolean),
   };
 }
