@@ -21,7 +21,8 @@ describe('retomada do worker', () => {
     const agenda = repository.create('agenda_preparation', { organizationId: 1 }, 'agenda:1:cycle');
     const market = repository.create('market_refresh', { dateFrom: '2026-08-01' }, 'market:2026-08-01');
 
-    repository.updateCheckpoint(source, { source: 'PNCP', cursor: 'page:3' });
+    expect(repository.claim(source, 'restart-test-owner')).toBe(true);
+    expect(repository.updateCheckpoint(source, { source: 'PNCP', cursor: 'page:3' }, 'restart-test-owner')).toBe(true);
 
     expect(repository.find(source)).toMatchObject({ type: 'source_sync', checkpoint: { cursor: 'page:3' } });
     expect(repository.find(agenda)?.type).toBe('agenda_preparation');

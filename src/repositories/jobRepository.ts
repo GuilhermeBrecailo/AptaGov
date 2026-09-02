@@ -125,34 +125,48 @@ export class JobRepository {
   }
 
   markCompleted(id: number, owner?: string): boolean {
-    const params: Array<string | number> = [new Date().toISOString(), id];
-    const ownerCondition = owner ? ' AND lease_owner = ?' : '';
-    if (owner) params.push(owner);
+    if (!owner?.trim()) return false;
+    const params: Array<string | number> = [new Date().toISOString(), id, owner];
     return this.db.prepare(`
       UPDATE job_runs
       SET status = 'COMPLETED', finished_at = ?, lease_owner = NULL, lease_until = NULL
-      WHERE id = ?${ownerCondition} AND (status = 'RUNNING' OR (status = 'PENDING' AND type = 'sync_and_classify'))
+      WHERE id = ? AND lease_owner = ? AND status = 'RUNNING'
     `).run(...params).changes > 0;
   }
 
+  markLegacyCompleted(id: number): boolean {
+    return this.db.prepare(`
+      UPDATE job_runs
+      SET status = 'COMPLETED', finished_at = ?, lease_owner = NULL, lease_until = NULL
+      WHERE id = ? AND status = 'PENDING' AND type = 'sync_and_classify' AND lease_owner IS NULL
+    `).run(new Date().toISOString(), id).changes > 0;
+  }
+
   markFailed(id: number, error: string, owner?: string): boolean {
-    const params: Array<string | number> = [error.slice(0, 500), new Date().toISOString(), id];
-    const ownerCondition = owner ? ' AND lease_owner = ?' : '';
-    if (owner) params.push(owner);
+    if (!owner?.trim()) return false;
+    const params: Array<string | number> = [error.slice(0, 500), new Date().toISOString(), id, owner];
     return this.db.prepare(`
       UPDATE job_runs
       SET status = 'FAILED', error_message = ?, finished_at = ?, lease_owner = NULL, lease_until = NULL
-      WHERE id = ?${ownerCondition} AND (status = 'RUNNING' OR (status = 'PENDING' AND ? = 1))
-    `).run(...params, owner ? 0 : 1).changes > 0;
+      WHERE id = ? AND lease_owner = ? AND status = 'RUNNING'
+    `).run(...params).changes > 0;
+  }
+
+  markInvalidPayload(id: number, error: string): boolean {
+    return this.db.prepare(`
+      UPDATE job_runs
+      SET status = 'FAILED', error_message = ?, finished_at = ?, lease_owner = NULL, lease_until = NULL
+      WHERE id = ? AND status = 'PENDING' AND lease_owner IS NULL
+    `).run(error.slice(0, 500), new Date().toISOString(), id).changes > 0;
   }
 
   updateCheckpoint(id: number, checkpoint: Record<string, unknown>, owner?: string): boolean {
+    if (!owner?.trim()) return false;
     const current = this.find(id);
     if (!current) return false;
     const params: Array<string | number> = [JSON.stringify({ ...current.checkpoint, ...checkpoint }), id];
-    const ownerCondition = owner ? ' AND lease_owner = ?' : '';
-    if (owner) params.push(owner);
-    return this.db.prepare(`UPDATE job_runs SET checkpoint_json = ? WHERE id = ?${ownerCondition}`).run(...params).changes > 0;
+    params.push(owner);
+    return this.db.prepare("UPDATE job_runs SET checkpoint_json = ? WHERE id = ? AND status = 'RUNNING' AND lease_owner = ?").run(...params).changes > 0;
   }
 
   recoverInterrupted(now = new Date(), staleAfterMs = DEFAULT_JOB_LEASE_MS): JobRecord[] {

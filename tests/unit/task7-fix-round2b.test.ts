@@ -15,7 +15,7 @@ describe('Task 7 fix round 2: retry e lease duráveis', () => {
 
     const claimed = repository.claimNext('worker-a', 60_000);
     expect(claimed).toBeDefined();
-    expect(repository.fail(claimed!.id, 'falha transitória', 'worker-a')).toBe(true);
+      expect(repository.fail(claimed!.id, 'falha transitória', 'worker-a', null)).toBe(true);
 
     expect(repository.claimNext('worker-a', 60_000)).toBeUndefined();
     expect(repository.find(claimed!.id)).toMatchObject({ status: 'FAILED', attempts: 1 });
@@ -30,7 +30,7 @@ describe('Task 7 fix round 2: retry e lease duráveis', () => {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const claimed = repository.claimNext('worker-a', 60_000);
       expect(claimed).toBeDefined();
-      expect(repository.fail(claimed!.id, `falha ${attempt + 1}`, 'worker-a')).toBe(true);
+      expect(repository.fail(claimed!.id, `falha ${attempt + 1}`, 'worker-a', null)).toBe(true);
       db.prepare('UPDATE worker_outbox SET next_retry_at = ? WHERE id = ?').run('2000-01-01T00:00:00.000Z', claimed!.id);
     }
 

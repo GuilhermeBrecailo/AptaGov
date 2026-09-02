@@ -9,6 +9,7 @@ import type {
 import type { Opportunity, OpportunityInput } from '../domain/types';
 import { OpportunityRepository } from './opportunityRepository';
 import { OperationalOutboxRepository } from './operationalOutboxRepository';
+import { normalizeOpportunitySnapshot } from '../services/opportunityChangeService';
 
 export type SourceCheckpointStatus = 'RUNNING' | 'COMPLETED' | 'FAILED';
 export type { SourceFlow } from '../domain/sourceTypes';
@@ -204,8 +205,9 @@ export class SourceSyncRepository {
         });
         persistedCount += 1;
         entries.push({ previous: persisted.previous, current: persisted.current });
+        const fingerprint = normalizeOpportunitySnapshot(persisted.current).fingerprint;
         this.outbox.enqueue({
-          eventKey: `opportunity-sync:${input.sourceCode}:${scopeKey}:${input.organizationId ?? 'global'}:${persisted.current.id}:${persisted.current.updatedAt}`,
+          eventKey: `opportunity-sync:${input.sourceCode}:${scopeKey}:${input.organizationId ?? 'global'}:${persisted.current.id}:${fingerprint}`,
           eventType: 'OPPORTUNITY_SYNCED',
           organizationId: input.organizationId,
           radarId: input.radarId,

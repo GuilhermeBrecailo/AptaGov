@@ -195,7 +195,7 @@ export class WorkerRuntime {
 
     if (!canRunAutomatic) {
       for (const legacyJob of legacyJobs) {
-        this.jobs.markCompleted(legacyJob.id);
+        this.jobs.markLegacyCompleted(legacyJob.id);
       }
       metrics.jobsCompleted += legacyJobs.length;
     }
@@ -487,13 +487,13 @@ export class WorkerRuntime {
   ): Promise<SyncAggregate> {
     const payload = sourcePayload(job.checkpoint);
     if (!payload) {
-      this.jobs.markFailed(job.id, 'Payload de sincronização inválido');
+      this.jobs.markInvalidPayload(job.id, 'Payload de sincronização inválido');
       metrics.jobsFailed += 1;
       return { received: 0, created: 0, updated: 0, entries: [] };
     }
     if (!jobInScope(job, mode, options, payload)) return { received: 0, created: 0, updated: 0, entries: [] };
     if (payload.radarId !== null && !this.savedSearches.find(payload.organizationId, payload.radarId)) {
-      this.jobs.markFailed(job.id, 'Radar da sincronização não existe');
+      this.jobs.markInvalidPayload(job.id, 'Radar da sincronização não existe');
       metrics.jobsFailed += 1;
       return { received: 0, created: 0, updated: 0, entries: [] };
     }
@@ -541,11 +541,11 @@ export class WorkerRuntime {
         const entry = outboxEntry(event);
         if (!entry) throw new Error('Evento operacional inválido');
         this.operationalSync.processEntry(entry, event.organizationId === null ? {} : { organizationId: event.organizationId });
-        this.outbox.complete(event.id, this.workerId);
+        this.outbox.complete(event.id, this.workerId, event.organizationId);
         processed += 1;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Falha no efeito operacional';
-        this.outbox.fail(event.id, message, this.workerId);
+        this.outbox.fail(event.id, message, this.workerId, event.organizationId);
         this.pauseStage('agenda', 'Efeito operacional pendente de reprocessamento', error);
         failed += 1;
       }
@@ -556,7 +556,7 @@ export class WorkerRuntime {
   private executeAgendaJob(job: JobRecord, metrics: WorkerCycleMetrics): number {
     const payload = agendaPayload(job.checkpoint);
     if (!payload) {
-      this.jobs.markFailed(job.id, 'Payload de agenda inválido');
+      this.jobs.markInvalidPayload(job.id, 'Payload de agenda inválido');
       metrics.jobsFailed += 1;
       return 0;
     }
@@ -573,7 +573,7 @@ export class WorkerRuntime {
         this.checklists.ensureDefaults(payload.organizationId, opportunityId);
         prepared += 1;
       }
-      this.jobs.updateCheckpoint(job.id, { prepared });
+      this.jobs.updateCheckpoint(job.id, { prepared }, owner);
       this.jobs.markCompleted(job.id, owner);
       metrics.jobsCompleted += 1;
       return prepared;
@@ -588,7 +588,7 @@ export class WorkerRuntime {
   private async executeMarketJob(job: JobRecord, metrics: WorkerCycleMetrics): Promise<MarketRefreshResult | undefined> {
     const payload = marketPayload(job.checkpoint);
     if (!payload) {
-      this.jobs.markFailed(job.id, 'Payload de mercado inválido');
+      this.jobs.markInvalidPayload(job.id, 'Payload de mercado inválido');
       metrics.jobsFailed += 1;
       return undefined;
     }

@@ -74,13 +74,20 @@ export class OperationalOutboxRepository {
   }
 
   claimNext(owner: string, leaseMs: number, organizationId?: number): OperationalOutboxEvent | undefined {
+    if (!owner.trim()) return undefined;
     const now = new Date();
     const nowIso = now.toISOString();
     const leaseUntil = new Date(now.getTime() + Math.max(0, leaseMs)).toISOString();
     const scope = organizationId === undefined ? '' : ' AND organization_id = ?';
-    const params: Array<string | number> = [MAX_OUTBOX_ATTEMPTS, nowIso, nowIso];
-    if (organizationId !== undefined) params.push(organizationId);
+    const scopeParams = organizationId === undefined ? [] : [organizationId];
     const event = this.db.transaction(() => {
+      this.db.prepare(`
+        UPDATE worker_outbox
+        SET status = 'FAILED', last_error = COALESCE(last_error, 'Limite de tentativas da outbox atingido'),
+          lease_owner = NULL, lease_until = NULL, next_retry_at = NULL, updated_at = ?
+        WHERE status = 'PROCESSING' AND lease_until IS NOT NULL AND lease_until <= ?
+          AND attempts >= ?${scope}
+      `).run(nowIso, nowIso, MAX_OUTBOX_ATTEMPTS, ...scopeParams);
       const row = this.db.prepare(`
         SELECT id FROM worker_outbox
         WHERE (
@@ -89,7 +96,7 @@ export class OperationalOutboxRepository {
         )
           ${scope}
         ORDER BY id ASC LIMIT 1
-      `).get(...params) as { id: number } | undefined;
+      `).get(MAX_OUTBOX_ATTEMPTS, nowIso, nowIso, ...scopeParams) as { id: number } | undefined;
       if (!row) return undefined;
       const updated = this.db.prepare(`
         UPDATE worker_outbox
@@ -98,38 +105,40 @@ export class OperationalOutboxRepository {
           (status IN ('PENDING', 'FAILED') AND attempts < ? AND (next_retry_at IS NULL OR next_retry_at <= ?))
           OR (status = 'PROCESSING' AND lease_until IS NOT NULL AND lease_until <= ?)
         )
-      `).run(owner, leaseUntil, nowIso, row.id, MAX_OUTBOX_ATTEMPTS, nowIso, nowIso);
+      `).run(owner, leaseUntil, nowIso, row.id, MAX_OUTBOX_ATTEMPTS, nowIso, nowIso, ...scopeParams);
       return updated.changes > 0 ? this.find(row.id) : undefined;
     })();
     return event;
   }
 
-  complete(id: number, owner?: string): boolean {
+  complete(id: number, owner?: string, organizationId?: number | null): boolean {
+    if (!owner?.trim() || organizationId === undefined) return false;
     const now = new Date().toISOString();
-    const params: Array<string | number> = [now, now, id];
-    const ownerCondition = owner ? ' AND lease_owner = ?' : '';
-    if (owner) params.push(owner);
+    const tenantCondition = organizationId === null ? ' AND organization_id IS NULL' : ' AND organization_id = ?';
+    const params: Array<string | number | null> = [now, now, id, owner];
+    if (organizationId !== null) params.push(organizationId);
     return this.db.prepare(`
       UPDATE worker_outbox
       SET status = 'COMPLETED', lease_owner = NULL, lease_until = NULL, next_retry_at = NULL, completed_at = ?, updated_at = ?
-      WHERE id = ?${ownerCondition} AND status = 'PROCESSING'
+      WHERE id = ? AND lease_owner = ? AND status = 'PROCESSING'${tenantCondition}
     `).run(...params).changes > 0;
   }
 
-  fail(id: number, error: string, owner?: string): boolean {
+  fail(id: number, error: string, owner?: string, organizationId?: number | null): boolean {
+    if (!owner?.trim() || organizationId === undefined) return false;
     const now = new Date();
     const current = this.find(id);
     if (!current) return false;
     const nextRetryAt = current.attempts >= MAX_OUTBOX_ATTEMPTS
       ? null
       : new Date(now.getTime() + retryDelayMs(current.attempts)).toISOString();
-    const params: Array<string | number | null> = [error.slice(0, 500), nextRetryAt, now.toISOString(), id];
-    const ownerCondition = owner ? ' AND lease_owner = ?' : '';
-    if (owner) params.push(owner);
+    const tenantCondition = organizationId === null ? ' AND organization_id IS NULL' : ' AND organization_id = ?';
+    const params: Array<string | number | null> = [error.slice(0, 500), nextRetryAt, now.toISOString(), id, owner];
+    if (organizationId !== null) params.push(organizationId);
     return this.db.prepare(`
       UPDATE worker_outbox
       SET status = 'FAILED', last_error = ?, next_retry_at = ?, lease_owner = NULL, lease_until = NULL, updated_at = ?
-      WHERE id = ?${ownerCondition} AND status = 'PROCESSING'
+      WHERE id = ? AND lease_owner = ? AND status = 'PROCESSING'${tenantCondition}
     `).run(...params).changes > 0;
   }
 

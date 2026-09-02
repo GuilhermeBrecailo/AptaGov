@@ -1,7 +1,7 @@
 # Task 7 — Orquestração durável de fontes oficiais
 
 Data: 2026-09-02  
-Status: rodada 3 concluída e verificada localmente
+Status: rodada 3 — corte 1 concluído e verificado localmente
 
 ## Correções entregues
 
@@ -22,6 +22,7 @@ Status: rodada 3 concluída e verificada localmente
 - `026_worker_cycle_metrics.sql`: métricas persistentes por ciclo/modo.
 - `027_durable_worker_followup.sql`: retry da outbox, backfill de tenant e single-flight terminal.
 - `028_legacy_job_scope.sql`: marca globais legados e encerra payloads de tenant incompatíveis.
+- `029_worker_delivery_leases.sql`: leases aditivos por entrega de e-mail e Web Push.
 
 As tabelas e colunas existentes foram preservadas; o comportamento manual, automático, scheduler, classificação, notificações e backup continua compatível.
 
@@ -68,3 +69,14 @@ As pendências listadas acima foram tratadas na rodada 3; permanecem apenas as l
 - Jobs legados com tenant válido são reivindicáveis pelo payload quando necessário; globais são marcados explicitamente e payloads incompatíveis deixam de ser órfãos em `PENDING`. Jobs inválidos também são terminalizados pelo runtime.
 
 Focused desta etapa: `tests/unit/task7-fix-round3.test.ts` passou com 7/7 testes; `tests/unit/source-checkpoint.test.ts` passou com 10/10; lint passou. A suíte completa passou com 50 arquivos/181 testes; typecheck e build também passaram.
+
+## Rodada 3 — corte 1: entrega, reclaim, fingerprint e owner
+
+- Entregas de e-mail e Web Push usam claim atômico por canal com `lease_owner`/`lease_until`; envio, renovação, `markSent` e `markFailed` são condicionados ao owner. O dedupe por `eventKey` foi preservado.
+- Reclaim stale da outbox com `attempts >= MAX_OUTBOX_ATTEMPTS` é terminalizado como `FAILED` sem nova reivindicação; `complete`/`fail` exigem owner e tenant explícito.
+- O eventKey de sincronização usa o fingerprint dos campos oficiais observados, evitando novo evento quando o polling só altera `updated_at`.
+- Mutações de job após claim exigem owner; payload inválido tem transição atômica própria e o caminho legado usa conclusão explícita.
+
+Verificações do corte 1: focused de concorrência/lease/reclaim/fingerprint em 6 arquivos e 24 testes passou; `npm run lint` e `npm run typecheck` passaram. A migration 029 foi incluída neste corte.
+
+Pendências do rereview-2 não incluídas neste corte: compatibilidade/rollout da migration 023, isolamento de `recordFailure` em queries compostas, health checks efetivos de backup/global/notificações e preservação de resultados por fonte em falha total do ciclo.

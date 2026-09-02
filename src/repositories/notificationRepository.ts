@@ -22,6 +22,8 @@ export interface NotificationDelivery {
   attempts: number;
   lastError: string | null;
   providerId: string | null;
+  leaseOwner: string | null;
+  leaseUntil: string | null;
 }
 
 export interface NotificationInput {
@@ -38,6 +40,8 @@ export interface OperationalNotificationInput extends NotificationInput {
   eventType: string;
   eventKey: string;
 }
+
+export const DEFAULT_NOTIFICATION_LEASE_MS = 5 * 60_000;
 
 export class NotificationRepository {
   constructor(private readonly db: SqliteDatabase) {}
@@ -104,6 +108,49 @@ export class NotificationRepository {
     return Boolean(this.db.prepare("SELECT 1 FROM notification_deliveries WHERE status = 'SENT' AND sent_at >= ? LIMIT 1").get(since));
   }
 
+  claimNext(owner: string, leaseMs = DEFAULT_NOTIFICATION_LEASE_MS, organizationId?: number): NotificationDelivery | undefined {
+    if (!owner.trim()) return undefined;
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const leaseUntil = new Date(now.getTime() + Math.max(0, leaseMs)).toISOString();
+    const scope = organizationId === undefined ? '' : ' AND d.organization_id = ?';
+    const updateScope = organizationId === undefined ? '' : ' AND organization_id = ?';
+    const scopeParams = organizationId === undefined ? [] : [organizationId];
+    return this.db.transaction(() => {
+      const row = this.db.prepare(`
+        SELECT d.id
+        FROM notification_deliveries d
+        INNER JOIN notification_settings s ON s.organization_id = d.organization_id AND s.enabled = 1
+        WHERE (
+          d.status IN ('PENDING', 'FAILED')
+          OR (d.status = 'PROCESSING' AND d.lease_until IS NOT NULL AND d.lease_until <= ?)
+        )${scope}
+        ORDER BY d.created_at ASC, d.id ASC
+        LIMIT 1
+      `).get(nowIso, ...scopeParams) as { id: number } | undefined;
+      if (!row) return undefined;
+      const updated = this.db.prepare(`
+        UPDATE notification_deliveries
+        SET status = 'PROCESSING', lease_owner = ?, lease_until = ?, updated_at = ?
+        WHERE id = ?
+          AND (
+            status IN ('PENDING', 'FAILED')
+            OR (status = 'PROCESSING' AND lease_until IS NOT NULL AND lease_until <= ?)
+          )${updateScope}
+      `).run(owner, leaseUntil, nowIso, row.id, nowIso, ...scopeParams);
+      return updated.changes > 0 ? this.find(row.id) : undefined;
+    })();
+  }
+
+  renew(id: number, owner: string, leaseMs = DEFAULT_NOTIFICATION_LEASE_MS): boolean {
+    const leaseUntil = new Date(Date.now() + Math.max(0, leaseMs)).toISOString();
+    return this.db.prepare(`
+      UPDATE notification_deliveries
+      SET lease_until = ?, updated_at = ?
+      WHERE id = ? AND status = 'PROCESSING' AND lease_owner = ?
+    `).run(leaseUntil, new Date().toISOString(), id, owner).changes > 0;
+  }
+
   list(organizationId?: number): NotificationDelivery[] {
     const rows = organizationId === undefined
       ? this.db.prepare('SELECT * FROM notification_deliveries ORDER BY created_at').all() as NotificationDeliveryRow[]
@@ -111,14 +158,22 @@ export class NotificationRepository {
     return rows.map(mapDelivery);
   }
 
-  markSent(id: number, providerId: string | undefined): void {
-    this.db.prepare("UPDATE notification_deliveries SET status = 'SENT', provider_id = ?, sent_at = ?, updated_at = ? WHERE id = ?")
-      .run(providerId ?? null, new Date().toISOString(), new Date().toISOString(), id);
+  markSent(id: number, providerId: string | undefined, owner?: string): boolean {
+    if (!owner?.trim()) return false;
+    const now = new Date().toISOString();
+    return this.db.prepare("UPDATE notification_deliveries SET status = 'SENT', provider_id = ?, sent_at = ?, lease_owner = NULL, lease_until = NULL, updated_at = ? WHERE id = ? AND status = 'PROCESSING' AND lease_owner = ?")
+      .run(providerId ?? null, now, now, id, owner).changes > 0;
   }
 
-  markFailed(id: number, error: string): void {
-    this.db.prepare("UPDATE notification_deliveries SET status = 'FAILED', attempts = attempts + 1, last_error = ?, updated_at = ? WHERE id = ?")
-      .run(error.slice(0, 500), new Date().toISOString(), id);
+  markFailed(id: number, error: string, owner?: string): boolean {
+    if (!owner?.trim()) return false;
+    return this.db.prepare("UPDATE notification_deliveries SET status = 'FAILED', attempts = attempts + 1, last_error = ?, lease_owner = NULL, lease_until = NULL, updated_at = ? WHERE id = ? AND status = 'PROCESSING' AND lease_owner = ?")
+      .run(error.slice(0, 500), new Date().toISOString(), id, owner).changes > 0;
+  }
+
+  private find(id: number): NotificationDelivery | undefined {
+    const row = this.db.prepare('SELECT * FROM notification_deliveries WHERE id = ?').get(id) as NotificationDeliveryRow | undefined;
+    return row ? mapDelivery(row) : undefined;
   }
 }
 
@@ -137,6 +192,8 @@ type NotificationDeliveryRow = {
   attempts: number;
   last_error: string | null;
   provider_id: string | null;
+  lease_owner: string | null;
+  lease_until: string | null;
 };
 
 function mapSettings(row: NotificationSettingsRow): NotificationSettings {
@@ -158,5 +215,7 @@ function mapDelivery(row: NotificationDeliveryRow): NotificationDelivery {
     attempts: row.attempts,
     lastError: row.last_error,
     providerId: row.provider_id,
+    leaseOwner: row.lease_owner,
+    leaseUntil: row.lease_until,
   };
 }

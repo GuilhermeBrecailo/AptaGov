@@ -2,7 +2,7 @@ import type { SqliteDatabase } from '../db/database';
 import type { Opportunity } from '../domain/types';
 import type { FilterConfig } from '../domain/types';
 import { loadFilters } from '../config/filters';
-import { NotificationRepository, type NotificationSettings } from '../repositories/notificationRepository';
+import { NotificationRepository, DEFAULT_NOTIFICATION_LEASE_MS, type NotificationSettings } from '../repositories/notificationRepository';
 import { OrganizationFilterRepository } from '../repositories/organizationFilterRepository';
 import { OpportunityRepository } from '../repositories/opportunityRepository';
 import { scoreOpportunity } from './scoring/ruleScorer';
@@ -24,6 +24,11 @@ export interface OperationalEmailAlert {
   body: string;
   eventType: string;
   eventKey: string;
+}
+
+export interface NotificationDeliveryOptions {
+  owner?: string;
+  leaseMs?: number;
 }
 
 export class NotificationService {
@@ -124,16 +129,28 @@ export class NotificationService {
     }, 0);
   }
 
-  async deliverPending(sender: NotificationSender, organizationId?: number): Promise<number> {
+  async deliverPending(sender: NotificationSender, organizationId?: number, options: NotificationDeliveryOptions = {}): Promise<number> {
     let delivered = 0;
-    for (const delivery of this.notifications.listPending(100, organizationId)) {
+    const owner = options.owner ?? deliveryOwner('email');
+    const leaseMs = options.leaseMs ?? DEFAULT_NOTIFICATION_LEASE_MS;
+    while (true) {
+      const delivery = this.notifications.claimNext(owner, leaseMs, organizationId);
+      if (!delivery) break;
       try {
-        const result = await sender.send({ to: delivery.recipient, subject: delivery.subject, body: delivery.body });
-        this.notifications.markSent(delivery.id, result.providerId);
+        const result = await withDeliveryLease(
+          delivery.id,
+          owner,
+          leaseMs,
+          () => this.notifications.renew(delivery.id, owner, leaseMs),
+          () => sender.send({ to: delivery.recipient, subject: delivery.subject, body: delivery.body }),
+        );
+        if (!this.notifications.markSent(delivery.id, result.providerId, owner)) {
+          throw new Error('Lease da entrega de e-mail perdido antes da confirmação');
+        }
         delivered += 1;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Falha desconhecida no canal de notificação';
-        this.notifications.markFailed(delivery.id, message);
+        this.notifications.markFailed(delivery.id, message, owner);
         throw error;
       }
     }
@@ -158,6 +175,31 @@ export class NotificationService {
 
   private opportunitiesDatabase(): SqliteDatabase {
     return this.db;
+  }
+}
+
+function deliveryOwner(channel: string): string {
+  return `${channel}:${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+}
+
+async function withDeliveryLease<T>(
+  id: number,
+  owner: string,
+  leaseMs: number,
+  renew: () => boolean,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const intervalMs = Math.max(10, Math.min(60_000, Math.floor(Math.max(1, leaseMs) / 3)));
+  let leaseLost = false;
+  const timer = setInterval(() => {
+    if (!renew()) leaseLost = true;
+  }, intervalMs);
+  try {
+    const result = await operation();
+    if (leaseLost) throw new Error(`Lease da entrega ${id} perdida durante o envio por ${owner}`);
+    return result;
+  } finally {
+    clearInterval(timer);
   }
 }
 

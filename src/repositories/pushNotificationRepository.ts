@@ -32,6 +32,8 @@ export interface PushDelivery {
   status: 'PENDING' | 'SENT' | 'FAILED';
   attempts: number;
   lastError: string | null;
+  leaseOwner: string | null;
+  leaseUntil: string | null;
 }
 
 export interface PushQueueOptions {
@@ -49,6 +51,8 @@ export interface OperationalPushInput {
   eventType: string;
   eventKey: string;
 }
+
+export const DEFAULT_PUSH_LEASE_MS = 5 * 60_000;
 
 export class PushNotificationRepository {
   constructor(private readonly db: SqliteDatabase) {}
@@ -267,15 +271,73 @@ export class PushNotificationRepository {
     return Boolean(this.db.prepare("SELECT 1 FROM push_deliveries WHERE status = 'SENT' AND sent_at >= ? LIMIT 1").get(since));
   }
 
-  markSent(id: number, providerId?: string): void {
-    const now = new Date().toISOString();
-    this.db.prepare("UPDATE push_deliveries SET status = 'SENT', provider_id = ?, sent_at = ?, updated_at = ? WHERE id = ?")
-      .run(providerId ?? null, now, now, id);
+  claimNext(owner: string, leaseMs = DEFAULT_PUSH_LEASE_MS, organizationId?: number): PushDelivery | undefined {
+    if (!owner.trim()) return undefined;
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const leaseUntil = new Date(now.getTime() + Math.max(0, leaseMs)).toISOString();
+    const scope = organizationId === undefined ? '' : `
+        AND EXISTS (
+          SELECT 1 FROM organization_memberships scoped_membership
+          WHERE scoped_membership.user_id = ps.user_id AND scoped_membership.organization_id = ?
+        )`;
+    const scopeParams = organizationId === undefined ? [] : [organizationId];
+    return this.db.transaction(() => {
+      const row = this.db.prepare(`
+        SELECT d.id
+        FROM push_deliveries d
+        INNER JOIN push_subscriptions ps ON ps.id = d.subscription_id
+        WHERE (
+          d.status IN ('PENDING', 'FAILED')
+          AND (d.lease_owner IS NULL OR d.lease_until IS NULL OR d.lease_until <= ?)
+        )${scope}
+        ORDER BY d.created_at ASC, d.id ASC
+        LIMIT 1
+      `).get(nowIso, ...scopeParams) as { id: number } | undefined;
+      if (!row) return undefined;
+      const updated = this.db.prepare(`
+        UPDATE push_deliveries
+        SET status = 'PENDING', lease_owner = ?, lease_until = ?, updated_at = ?
+        WHERE id = ?
+          AND (
+            status IN ('PENDING', 'FAILED')
+            AND (lease_owner IS NULL OR lease_until IS NULL OR lease_until <= ?)
+          )
+      `).run(owner, leaseUntil, nowIso, row.id, nowIso);
+      return updated.changes > 0 ? this.findDelivery(row.id) : undefined;
+    })();
   }
 
-  markFailed(id: number, error: string): void {
-    this.db.prepare("UPDATE push_deliveries SET status = 'FAILED', attempts = attempts + 1, last_error = ?, updated_at = ? WHERE id = ?")
-      .run(error.slice(0, 500), new Date().toISOString(), id);
+  renew(id: number, owner: string, leaseMs = DEFAULT_PUSH_LEASE_MS): boolean {
+    const leaseUntil = new Date(Date.now() + Math.max(0, leaseMs)).toISOString();
+    return this.db.prepare(`
+      UPDATE push_deliveries
+      SET lease_until = ?, updated_at = ?
+      WHERE id = ? AND status = 'PENDING' AND lease_owner = ?
+    `).run(leaseUntil, new Date().toISOString(), id, owner).changes > 0;
+  }
+
+  markSent(id: number, providerId: string | undefined, owner?: string): boolean {
+    if (!owner?.trim()) return false;
+    const now = new Date().toISOString();
+    return this.db.prepare("UPDATE push_deliveries SET status = 'SENT', provider_id = ?, sent_at = ?, lease_owner = NULL, lease_until = NULL, updated_at = ? WHERE id = ? AND status = 'PENDING' AND lease_owner = ?")
+      .run(providerId ?? null, now, now, id, owner).changes > 0;
+  }
+
+  markFailed(id: number, error: string, owner?: string): boolean {
+    if (!owner?.trim()) return false;
+    return this.db.prepare("UPDATE push_deliveries SET status = 'FAILED', attempts = attempts + 1, last_error = ?, lease_owner = NULL, lease_until = NULL, updated_at = ? WHERE id = ? AND status = 'PENDING' AND lease_owner = ?")
+      .run(error.slice(0, 500), new Date().toISOString(), id, owner).changes > 0;
+  }
+
+  private findDelivery(id: number): PushDelivery | undefined {
+    const row = this.db.prepare(`
+      SELECT d.*, ps.endpoint, ps.p256dh, ps.auth, ps.expiration_time
+      FROM push_deliveries d
+      INNER JOIN push_subscriptions ps ON ps.id = d.subscription_id
+      WHERE d.id = ?
+    `).get(id) as PushDeliveryRow | undefined;
+    return row ? mapDelivery(row) : undefined;
   }
 
   removeSubscription(subscriptionId: number): void {
@@ -310,6 +372,8 @@ type PushDeliveryRow = PushSubscriptionRow & {
   url: string;
   status: PushDelivery['status'];
   attempts: number;
+  lease_owner: string | null;
+  lease_until: string | null;
 };
 
 function mapSubscription(row: PushSubscriptionRow): PushSubscriptionRecord {
@@ -340,6 +404,8 @@ function mapDelivery(row: PushDeliveryRow): PushDelivery {
     status: row.status,
     attempts: row.attempts,
     lastError: row.last_error,
+    leaseOwner: row.lease_owner,
+    leaseUntil: row.lease_until,
   };
 }
 
