@@ -37,23 +37,40 @@ const busy = ref(false);
 const message = ref('');
 const states = ['', 'SP', 'RJ', 'MG', 'PR', 'SC', 'RS', 'GO', 'BA', 'DF'];
 const selectedRadar = computed(() => radarPayload.value?.data.find((radar) => radar.id === selectedRadarId.value));
+const focusedOpportunityId = computed(() => {
+  const raw = route.query.opportunity;
+  if (typeof raw !== 'string') return undefined;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+});
 const checklistByOpportunity = ref<Record<number, ChecklistItem[]>>({});
 const checklistLoadingIds = ref<number[]>([]);
 const checklistSavingIds = ref<number[]>([]);
 
-const query = computed(() => ({
-  q: searchTerm.value || undefined,
-  minScore: selectedRadar.value?.filters.minimumScore ?? filters.value?.minimumScore ?? 0,
-  state: stateInput.value || undefined,
-  radarId: selectedRadarId.value,
-  sort: sortInput.value,
-  openDeadlineOnly: openDeadlineOnly.value,
-  hideNotRelevant: activeView.value === 'catalog',
-  page: page.value,
-  pageSize: activeView.value === 'kanban' ? 50 : 20,
-  kanbanOnly: activeView.value === 'kanban',
-  opportunity: route.query.opportunity,
-}));
+const query = computed(() => {
+  if (activeView.value === 'kanban' && focusedOpportunityId.value !== undefined) {
+    return {
+      opportunity: route.query.opportunity,
+      opportunityId: focusedOpportunityId.value,
+      page: 1,
+      pageSize: 1,
+      kanbanOnly: true,
+    };
+  }
+  return {
+    q: searchTerm.value || undefined,
+    minScore: selectedRadar.value?.filters.minimumScore ?? filters.value?.minimumScore ?? 0,
+    state: stateInput.value || undefined,
+    radarId: selectedRadarId.value,
+    sort: sortInput.value,
+    openDeadlineOnly: openDeadlineOnly.value,
+    hideNotRelevant: activeView.value === 'catalog',
+    page: page.value,
+    pageSize: activeView.value === 'kanban' ? 50 : 20,
+    kanbanOnly: activeView.value === 'kanban',
+    opportunity: route.query.opportunity,
+  };
+});
 const { data: catalog, pending: catalogLoading, refresh: refreshCatalog } = await useFetch<CatalogPage>('/api/opportunities', {
   query,
   default: () => ({ data: [], total: 0, page: 1, pageSize: 20, totalPages: 1 }),

@@ -16,6 +16,7 @@ import { handleAgendaPost } from '../../server/api/agenda.post';
 import { handleAgendaPatch } from '../../server/api/agenda/[id].patch';
 import { handleOpportunityChangeRead } from '../../server/api/opportunities/[id]/changes/[changeId]/read.patch';
 import { handleOpportunityChangesGet } from '../../server/api/opportunities/[id]/changes.get';
+import { handleOpportunityChangesListGet } from '../../server/api/opportunities/changes.get';
 
 function createOpportunity(db: ReturnType<typeof createTestDatabase>, pncpId: string): number {
   return new OpportunityRepository(db).insert({
@@ -273,6 +274,41 @@ describe('agenda e histórico operacional via handlers', () => {
     expect(unreadAfter).toEqual([]);
   });
 
+  it('lista mudanças de todas as oportunidades autorizadas da organização', () => {
+    const db = createTestDatabase();
+    const organizations = new OrganizationRepository(db);
+    const first = organizations.create('Empresa Changes em Lote A');
+    const second = organizations.create('Empresa Changes em Lote B');
+    const opportunities = new OpportunityRepository(db);
+    const firstOpportunityId = createOpportunity(db, 'agenda-api-batch-a');
+    const secondOpportunityId = createOpportunity(db, 'agenda-api-batch-b');
+    opportunities.addToKanban(first.id, firstOpportunityId);
+    opportunities.addToKanban(second.id, secondOpportunityId);
+    const changes = new OpportunityChangeRepository(db);
+    changes.record({
+      opportunityId: firstOpportunityId,
+      sourceCode: 'PNCP',
+      type: 'SOURCE_UPDATE',
+      fingerprint: 'batch:first',
+      summary: 'Mudança da primeira oportunidade',
+      payload: {},
+      detectedAt: '2026-09-01T15:00:00.000Z',
+    });
+    changes.record({
+      opportunityId: secondOpportunityId,
+      sourceCode: 'PNCP',
+      type: 'SOURCE_UPDATE',
+      fingerprint: 'batch:second',
+      summary: 'Mudança da segunda oportunidade',
+      payload: {},
+      detectedAt: '2026-09-01T16:00:00.000Z',
+    });
+
+    const listed = handleOpportunityChangesListGet({ db, organizationId: first.id, query: {} });
+
+    expect(listed.map((change) => change.opportunityId)).toEqual([firstOpportunityId]);
+  });
+
   it('mantém os endpoints protegidos por billing ativo operacional', () => {
     const root = resolve('C:/Users/user/Documents/dev/licitacoes-pncp/server/api');
 
@@ -280,6 +316,7 @@ describe('agenda e histórico operacional via handlers', () => {
     expect(readFileSync(resolve(root, 'agenda.post.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
     expect(readFileSync(resolve(root, 'agenda/[id].patch.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
     expect(readFileSync(resolve(root, 'opportunities/[id]/changes.get.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
+    expect(readFileSync(resolve(root, 'opportunities/changes.get.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
     expect(readFileSync(resolve(root, 'opportunities/[id]/changes/[changeId]/read.patch.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
     expect(readFileSync(resolve(root, 'agenda-preferences.get.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
     expect(readFileSync(resolve(root, 'agenda-preferences.put.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");

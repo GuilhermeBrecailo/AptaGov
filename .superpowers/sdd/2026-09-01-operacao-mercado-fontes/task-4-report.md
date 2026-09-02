@@ -19,7 +19,9 @@ Implementação concluída em PT-BR para desktop e mobile, conectada às APIs ex
 - Bloco `Preparação` nos detalhes e nos cards do Kanban com progresso, itens urgentes, próximo prazo, responsável e conclusão rápida.
 - Editor de item de preparação para título, responsável, prazo e nota.
 - Carregamento e atualização de checklists centralizados na página principal, mantendo os componentes de apresentação sem acesso direto a regras ou serviços de domínio.
-- Link da agenda para `/?opportunity=<id>`, que abre o Kanban e seleciona a oportunidade quando ela está no conjunto carregado.
+- Link da agenda para `/?opportunity=<id>`, que abre o Kanban e seleciona a oportunidade por lookup autorizado direto, mesmo quando ela está além da primeira página.
+- Endpoint de mudanças em lote com isolamento por organização e lookup direto de oportunidades referenciadas por lembretes ou mudanças.
+- Handlers autenticados de GET/PATCH do checklist versionados, com validação de `assigneeUserId` por membership da organização.
 
 ## Direção visual aplicada
 
@@ -53,6 +55,14 @@ Comando:
 
 Resultado: 2 arquivos aprovados, 4 testes aprovados, 0 falhas.
 
+### Rodada de correção
+
+Comando:
+
+`npm test -- --run tests/unit/operational-ui-contract.test.ts tests/unit/navigation.test.ts tests/unit/agenda-api.test.ts tests/unit/checklist-api.test.ts tests/unit/checklist.test.ts tests/unit/kanban-api.test.ts tests/unit/catalog.test.ts tests/unit/operational-view-model.test.ts`
+
+Resultado: 8 arquivos aprovados, 25 testes aprovados, 0 falhas. A cobertura inclui autorização cross-org do responsável, mudanças em lote, preferências aplicadas à exibição, lookup direto além da primeira página e view model de apresentação da checklist.
+
 ### Tipos
 
 Comando:
@@ -83,19 +93,26 @@ Resultado: `ESLint: No issues found`.
 - `app/components/AppNavDrawer.vue`
 - `app/types.ts`
 - `app/assets/css/main.css`
+- `app/viewModels/operationalViewModels.ts`
+- `server/api/opportunities/[id]/checklist.get.ts`
+- `server/api/opportunities/[id]/checklist/[itemId].patch.ts`
+- `server/api/opportunities/changes.get.ts`
 - `tests/unit/operational-ui-contract.test.ts`
 - `tests/unit/navigation.test.ts`
+- `tests/unit/checklist-api.test.ts`
+- `tests/unit/operational-view-model.test.ts`
 
 ## Self-review
 
 - Nenhuma regra de score, transição de Kanban ou persistência foi adicionada ao Vue.
 - A classificação dos eventos em cores/rótulos é apenas adaptação de apresentação dos tipos fornecidos pelas APIs.
-- A regra arbitrária anterior de “urgente em 48 horas” foi removida; a UI marca como urgente apenas item aberto com vencimento no dia atual ou anterior.
+- Urgência, próximo item e progresso são calculados em `app/viewModels/operationalViewModels.ts`, explicitamente como apresentação; o componente Vue apenas renderiza o resultado.
+- Preferências oficiais filtram a exibição atual de lembretes e mudanças, preservando lembretes manuais.
 - Os eventos e handlers de checklist mantêm o `opportunityId` explícito, evitando atualizar o card errado.
 - O editor de lembrete recebeu foco inicial e a primeira coluna da grade mensal teve a borda corrigida durante a revisão.
 
 ## Concerns conhecidos
 
 - O lint do repositório inteiro ainda encontra um erro pré-existente fora do escopo da Task 4: `src/services/checklistService.ts:1` importa `ChecklistTemplateKey` sem uso. Os arquivos da Task 4 passam no lint focado.
-- Os arquivos de API de checklist e o plano em `docs/superpowers/plans/` já estavam não versionados no início desta execução e foram preservados fora do commit da Task 4.
+- O plano em `docs/superpowers/plans/` já estava não versionado no início desta execução e permanece fora do commit da correção.
 - Não houve push, deploy ou manipulação de segredos.

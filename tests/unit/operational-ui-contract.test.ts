@@ -7,6 +7,10 @@ describe('contrato visual operacional', () => {
     expect(existsSync('app/components/AgendaView.vue')).toBe(true);
     expect(existsSync('app/components/OpportunityChecklist.vue')).toBe(true);
     expect(existsSync('app/components/ChecklistItemEditor.vue')).toBe(true);
+    expect(existsSync('app/viewModels/operationalViewModels.ts')).toBe(true);
+    expect(existsSync('server/api/opportunities/[id]/checklist.get.ts')).toBe(true);
+    expect(existsSync('server/api/opportunities/[id]/checklist/[itemId].patch.ts')).toBe(true);
+    expect(existsSync('server/api/opportunities/changes.get.ts')).toBe(true);
 
     const agendaPage = readFileSync('app/pages/agenda.vue', 'utf8');
     const agendaView = readFileSync('app/components/AgendaView.vue', 'utf8');
@@ -15,9 +19,11 @@ describe('contrato visual operacional', () => {
     const details = readFileSync('app/components/OpportunityDetails.vue', 'utf8');
     const kanban = readFileSync('app/components/OpportunityKanban.vue', 'utf8');
     const home = readFileSync('app/pages/index.vue', 'utf8');
+    const viewModels = readFileSync('app/viewModels/operationalViewModels.ts', 'utf8');
 
     expect(agendaPage).toContain('/api/agenda');
     expect(agendaPage).toContain('/api/agenda-preferences');
+    expect(agendaPage).toContain('/api/opportunities/changes');
     expect(agendaPage).toContain('Agenda operacional');
     expect(agendaView).toContain('Agenda');
     expect(agendaView).toContain('Visão mensal');
@@ -44,5 +50,7 @@ describe('contrato visual operacional', () => {
     expect(details).toContain('OpportunityChecklist');
     expect(kanban).toContain('OpportunityChecklist');
     expect(home).toContain("opportunity: route.query.opportunity");
+    expect(home).toContain('opportunityId');
+    expect(viewModels).toContain('buildChecklistPresentation');
   });
 });

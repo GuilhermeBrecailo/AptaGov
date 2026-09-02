@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { watch } from 'vue';
 import AgendaView from '../components/AgendaView.vue';
+import { shouldShowAgendaEntry } from '../viewModels/operationalViewModels';
 import type {
   AgendaEntryView,
   AgendaReminderDraft,
@@ -35,31 +36,58 @@ const { data: opportunityPage } = await useFetch<CatalogPage>('/api/opportunitie
   query: { kanbanOnly: true, pageSize: 50, sort: 'deadline' },
   default: () => ({ data: [], total: 0, page: 1, pageSize: 50, totalPages: 1 }),
 });
+const { data: changes, pending: changesLoading } = await useFetch<OpportunityChangeEvent[]>('/api/opportunities/changes', {
+  default: () => [],
+});
 
-const opportunities = computed(() => opportunityPage.value?.data ?? []);
-const changes = ref<OpportunityChangeEvent[]>([]);
+const directOpportunities = ref<Record<number, CatalogOpportunity>>({});
+const opportunityLoadingIds = ref<number[]>([]);
+const opportunityIds = computed(() => [...new Set([
+  ...(reminders.value ?? []).map((reminder) => reminder.opportunityId),
+  ...(changes.value ?? []).map((change) => change.opportunityId),
+])]);
+const opportunities = computed(() => {
+  const byId = new Map((opportunityPage.value?.data ?? []).map((opportunity) => [opportunity.id, opportunity]));
+  for (const opportunity of Object.values(directOpportunities.value)) byId.set(opportunity.id, opportunity);
+  return [...byId.values()];
+});
+const agendaLoadingState = computed(() => Boolean(agendaLoading.value || changesLoading.value || opportunityLoadingIds.value.length));
 
-await loadChanges(opportunities.value);
-watch(opportunities, (items) => void loadChanges(items));
+watch(opportunityIds, (ids) => void loadMissingOpportunities(ids), { immediate: true });
 
 const entries = computed<AgendaEntryView[]>(() => {
   const opportunityById = new Map(opportunities.value.map((opportunity) => [opportunity.id, opportunity]));
   const reminderEntries = (reminders.value ?? []).flatMap((reminder) => {
     const opportunity = opportunityById.get(reminder.opportunityId);
-    return opportunity ? [reminderEntry(reminder, opportunity)] : [];
+    const entry = opportunity ? reminderEntry(reminder, opportunity) : null;
+    return entry && shouldShowAgendaEntry(entry, preferences.value) ? [entry] : [];
   });
-  const changeEntries = changes.value.flatMap((change) => {
+  const changeEntries = (changes.value ?? []).flatMap((change) => {
     const opportunity = opportunityById.get(change.opportunityId);
-    return opportunity ? [changeEntry(change, opportunity)] : [];
+    const entry = opportunity ? changeEntry(change, opportunity) : null;
+    return entry && shouldShowAgendaEntry(entry, preferences.value) ? [entry] : [];
   });
   return [...reminderEntries, ...changeEntries]
     .sort((left, right) => new Date(left.occurredAt).getTime() - new Date(right.occurredAt).getTime());
 });
 
-async function loadChanges(items: CatalogOpportunity[]) {
-  changes.value = (await Promise.all(items.map((opportunity) => (
-    $fetch<OpportunityChangeEvent[]>(`/api/opportunities/${opportunity.id}/changes`)
-  )))).flat();
+async function loadMissingOpportunities(ids: number[]) {
+  const knownIds = new Set(opportunities.value.map((opportunity) => opportunity.id));
+  const missingIds = ids.filter((id) => !knownIds.has(id) && !opportunityLoadingIds.value.includes(id));
+  if (!missingIds.length) return;
+  opportunityLoadingIds.value = [...opportunityLoadingIds.value, ...missingIds];
+  try {
+    const pages = await Promise.all(missingIds.map((id) => $fetch<CatalogPage>('/api/opportunities', {
+      query: { opportunityId: id, page: 1, pageSize: 1, hideNotRelevant: false },
+    })));
+    const additions = pages.flatMap((page) => page.data);
+    directOpportunities.value = {
+      ...directOpportunities.value,
+      ...Object.fromEntries(additions.map((opportunity) => [opportunity.id, opportunity])),
+    };
+  } finally {
+    opportunityLoadingIds.value = opportunityLoadingIds.value.filter((id) => !missingIds.includes(id));
+  }
 }
 
 async function saveReminder(draft: AgendaReminderDraft) {
@@ -217,7 +245,7 @@ function rangeBoundary(value: string, end: boolean): string {
         :opportunities="opportunities"
         :preferences="preferences ?? null"
         :range="range"
-        :loading="agendaLoading"
+        :loading="agendaLoadingState"
         :saving="saving"
         @range-change="range = $event"
         @save-reminder="saveReminder"

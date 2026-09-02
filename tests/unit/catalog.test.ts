@@ -4,6 +4,7 @@ import { OrganizationRepository } from '../../src/repositories/organizationRepos
 import { OpportunityRepository } from '../../src/repositories/opportunityRepository';
 import { UserRepository } from '../../src/repositories/userRepository';
 import type { FilterConfig } from '../../src/domain/types';
+import { handleOpportunitiesGet } from '../../server/api/opportunities.get';
 
 describe('catálogo de licitações', () => {
   it('pesquisa, filtra por score e preserva paginação', () => {
@@ -39,6 +40,58 @@ describe('catálogo de licitações', () => {
 
     expect(opportunities.listCatalog({ organizationId: organizationA.id, kanbanOnly: true }).data).toHaveLength(1);
     expect(opportunities.listCatalog({ organizationId: organizationB.id, kanbanOnly: true }).data).toHaveLength(0);
+  });
+
+  it('busca diretamente uma oportunidade autorizada sem depender da primeira pagina', () => {
+    const db = createTestDatabase();
+    const organizations = new OrganizationRepository(db);
+    const first = organizations.create('Empresa Catalogo Direto A');
+    const second = organizations.create('Empresa Catalogo Direto B');
+    const opportunities = new OpportunityRepository(db);
+    for (let index = 0; index < 50; index += 1) {
+      const pageItemId = opportunities.insert({
+        pncpId: `catalog-direct-page-${index}`,
+        title: `Oportunidade da pagina inicial ${index}`,
+        description: '',
+        organization: 'Orgao',
+        state: 'SP',
+        sourceUrl: `https://pncp.gov.br/catalog-direct-page-${index}`,
+        publicationDate: '2026-09-01T10:00:00.000Z',
+        estimatedValueCents: 0,
+      });
+      opportunities.addToKanban(first.id, pageItemId);
+    }
+    const opportunityId = opportunities.insert({
+      pncpId: 'catalog-direct-1',
+      title: 'Oportunidade depois da pagina inicial',
+      description: '',
+      organization: 'Orgao',
+      state: 'SP',
+      sourceUrl: 'https://pncp.gov.br/catalog-direct-1',
+      publicationDate: '2026-08-01T10:00:00.000Z',
+      estimatedValueCents: 0,
+    });
+    opportunities.addToKanban(first.id, opportunityId);
+    const firstPage = handleOpportunitiesGet({
+      opportunities,
+      organizationId: first.id,
+      query: { page: '1', pageSize: '50', sort: 'publication', kanbanOnly: 'true' },
+    });
+
+    const direct = handleOpportunitiesGet({
+      opportunities,
+      organizationId: first.id,
+      query: { opportunityId: String(opportunityId), kanbanOnly: 'true' },
+    });
+    const crossOrganization = handleOpportunitiesGet({
+      opportunities,
+      organizationId: second.id,
+      query: { opportunityId: String(opportunityId), kanbanOnly: 'true' },
+    });
+
+    expect(firstPage.data).not.toContainEqual(expect.objectContaining({ id: opportunityId }));
+    expect(direct.data.map((item) => item.id)).toEqual([opportunityId]);
+    expect(crossOrganization.data).toEqual([]);
   });
 
   it('aplica os filtros do radar selecionado no catálogo', () => {

@@ -33,6 +33,7 @@ type OrganizationScoreRow = {
 export interface CatalogQuery {
   organizationId?: number;
   q?: string;
+  opportunityId?: number;
   minScore?: number;
   state?: string;
   page?: number;
@@ -88,6 +89,10 @@ export class OpportunityRepository {
     const organizationId = query.organizationId ?? -1;
     const params: Array<string | number> = [organizationId, organizationId, organizationId];
     const search = query.q?.trim();
+    if (query.opportunityId !== undefined) {
+      conditions.push('o.id = ?');
+      params.push(query.opportunityId);
+    }
     if (search) {
       conditions.push('(o.title LIKE ? OR o.description LIKE ? OR o.organization LIKE ?)');
       const pattern = `%${search}%`;

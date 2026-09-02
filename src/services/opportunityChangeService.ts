@@ -40,6 +40,10 @@ export class OpportunityChangeService {
     return this.changes.listForOrganization(organizationId, opportunityId, unreadOnly);
   }
 
+  listAllForOrganization(organizationId: number, unreadOnly = false): OpportunityChangeEvent[] {
+    return this.changes.listForOrganization(organizationId, undefined, unreadOnly);
+  }
+
   markRead(organizationId: number, opportunityId: number, changeId: number): OpportunityChangeEvent | undefined {
     const visible = this.changes.listForOrganization(organizationId, opportunityId)
       .find((event) => event.id === changeId);
