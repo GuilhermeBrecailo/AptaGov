@@ -260,7 +260,7 @@ export class WorkerRuntime {
       aggregate.entries.push(...result.entries);
     }
 
-    const outboxResult = this.processOperationalOutbox(mode === 'manual' ? options.organizationId : undefined, metrics);
+    const outboxResult = this.processOperationalOutbox(mode === 'manual' ? options.organizationId : undefined);
     metrics.outboxProcessed = outboxResult.processed;
     metrics.outboxFailed = outboxResult.failed;
 
@@ -462,14 +462,14 @@ export class WorkerRuntime {
       return { received: 0, created: 0, updated: 0, entries: [] };
     }
     try {
-      const result = await this.sourceSyncService.run({
-        filters: payload.filters,
-        today: new Date(payload.today),
-        organizationId: payload.organizationId,
-        radarId: payload.radarId,
-        scopeKey: payload.scopeKey ?? sourceScopeKey(payload.organizationId, payload.radarId),
-        skipSources: pausedSources.size > 0 ? pausedSources : undefined,
-      });
+      const result = await this.withLeaseHeartbeat(job.id, owner, () => this.sourceSyncService.run({
+          filters: payload.filters,
+          today: new Date(payload.today),
+          organizationId: payload.organizationId,
+          radarId: payload.radarId,
+          scopeKey: payload.scopeKey ?? sourceScopeKey(payload.organizationId, payload.radarId),
+          skipSources: pausedSources.size > 0 ? pausedSources : undefined,
+        }));
       this.jobs.updateCheckpoint(job.id, { sourceResults: result.sourceResults.map(sourceMetric) }, owner);
       this.jobs.markCompleted(job.id, owner);
       metrics.jobsCompleted += 1;
@@ -490,10 +490,11 @@ export class WorkerRuntime {
     }
   }
 
-  private processOperationalOutbox(organizationId: number | undefined, metrics: WorkerCycleMetrics): { processed: number; failed: number } {
+  private processOperationalOutbox(organizationId: number | undefined): { processed: number; failed: number } {
     let processed = 0;
     let failed = 0;
-    while (true) {
+    const maxEventsPerCycle = 100;
+    while (processed + failed < maxEventsPerCycle) {
       const event = this.outbox.claimNext(this.workerId, this.env.workerLeaseMs, organizationId);
       if (!event) break;
       try {
@@ -524,6 +525,7 @@ export class WorkerRuntime {
     try {
       let prepared = 0;
       for (const opportunityId of this.opportunities.listKanbanOpportunityIds(payload.organizationId)) {
+        if (!this.jobs.renew(job.id, owner, this.env.workerLeaseMs)) throw new Error('Lease da preparaÃ§Ã£o de agenda expirado');
         const opportunity = this.opportunities.findById(opportunityId);
         if (!opportunity) continue;
         const current = normalizeOpportunitySnapshot(opportunity);
@@ -554,15 +556,15 @@ export class WorkerRuntime {
     if (!this.jobs.claim(job.id, owner, this.env.workerLeaseMs, { organizationId: payload.organizationId, radarId: payload.radarId })) return undefined;
     try {
       const pausedSources = pausedSourceIds(this.systemState, 'market');
-      const result = await this.marketRefreshService.run({
-        filters: payload.filters,
-        today: new Date(payload.today),
-        lookbackDays: payload.lookbackDays,
-        organizationId: payload.organizationId,
-        radarId: payload.radarId,
-        scopeKey: marketScopeKey(payload.organizationId, payload.radarId),
-        skipSources: pausedSources.size > 0 ? pausedSources : undefined,
-      });
+      const result = await this.withLeaseHeartbeat(job.id, owner, () => this.marketRefreshService.run({
+          filters: payload.filters,
+          today: new Date(payload.today),
+          lookbackDays: payload.lookbackDays,
+          organizationId: payload.organizationId,
+          radarId: payload.radarId,
+          scopeKey: marketScopeKey(payload.organizationId, payload.radarId),
+          skipSources: pausedSources.size > 0 ? pausedSources : undefined,
+        }));
       this.jobs.updateCheckpoint(job.id, { sourceResults: result.sourceResults }, owner);
       this.jobs.markCompleted(job.id, owner);
       metrics.jobsCompleted += 1;
@@ -669,6 +671,21 @@ export class WorkerRuntime {
       ? (/e-mail/i.test(reason) ? 'email' : /dispositivo/i.test(reason) ? 'push' : undefined)
       : undefined);
     this.systemState.pauseStage(stage, reason, { error: error instanceof Error ? error.message : String(error), ...(source ? { source } : {}), ...(inferredChannel ? { channel: inferredChannel } : {}) });
+  }
+
+  private async withLeaseHeartbeat<T>(jobId: number, owner: string, operation: () => Promise<T>): Promise<T> {
+    const intervalMs = Math.max(10, Math.min(60_000, Math.floor(this.env.workerLeaseMs / 3)));
+    let leaseLost = false;
+    const timer = setInterval(() => {
+      if (!this.jobs.renew(jobId, owner, this.env.workerLeaseMs)) leaseLost = true;
+    }, intervalMs);
+    try {
+      const result = await operation();
+      if (leaseLost) throw new Error('Lease do job expirado durante a operaÃ§Ã£o');
+      return result;
+    } finally {
+      clearInterval(timer);
+    }
   }
 }
 

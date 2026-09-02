@@ -1,7 +1,7 @@
 # Task 7 — Orquestração durável de fontes oficiais
 
 Data: 2026-09-02  
-Status: implementada e verificada na rodada incremental final
+Status: corte parcial da rodada 2 implementado e verificado
 
 ## Correções entregues
 
@@ -39,3 +39,16 @@ As tabelas e colunas existentes foram preservadas; o comportamento manual, autom
 ## Fora do escopo
 
 Nenhum push, deploy ou alteração visual foi realizada.
+
+## Rodada 2 — corte parcial
+
+Este corte trata somente retry durável da outbox e single-flight/lease dos jobs.
+
+- `worker_outbox.next_retry_at` usa backoff exponencial limitado e `MAX_OUTBOX_ATTEMPTS=5`; falhas não são reivindicadas novamente no mesmo ciclo e o loop ainda possui limite de segurança por ciclo.
+- A migration aditiva `027_durable_worker_followup` adiciona `next_retry_at`, índice de retry, backfill de tenant a partir de `checkpoint_json`, tratamento explícito de jobs globais e unicidade da chave operacional em todos os estados. Duplicatas históricas são preservadas com chave legada sufixada.
+- `JobRepository.reserve` mantém single-flight mesmo após `COMPLETED`, recupera jobs `FAILED` para o próximo ciclo, aceita payload legado na filtragem/claim e mantém conclusão/renovação condicionadas ao owner.
+- `WorkerRuntime` renova leases durante sincronizações longas de fonte/mercado e durante a preparação de agenda; o parâmetro não utilizado do processamento da outbox foi removido.
+
+Verificações do corte: focused Task 7 em 9 arquivos/30 testes, lint e typecheck passaram. A suíte completa ainda não foi rodada neste corte; a regressão de `source-checkpoint` e as demais pendências do rereview continuam abertas. Build também permanece pendente.
+
+Pendências deliberadamente não implementadas neste corte: coerência da pausa global legada com pausas compostas, health check efetivo por canal de notificação sem fallback indevido do override, compatibilidade de leitura do checkpoint sem fluxo e falha no escopo correto, validação de `radarId` por organização, exposição administrativa de `source_runs`/métricas e fechamento dos status/categorias/órfãos legados.

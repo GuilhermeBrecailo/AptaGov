@@ -2,6 +2,10 @@ import type { SqliteDatabase } from '../db/database';
 
 export type OutboxStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 
+export const MAX_OUTBOX_ATTEMPTS = 5;
+const OUTBOX_RETRY_BASE_MS = 30_000;
+const OUTBOX_RETRY_MAX_MS = 60 * 60_000;
+
 export interface OperationalOutboxEvent<T = unknown> {
   id: number;
   eventKey: string;
@@ -13,6 +17,7 @@ export interface OperationalOutboxEvent<T = unknown> {
   attempts: number;
   leaseOwner: string | null;
   leaseUntil: string | null;
+  nextRetryAt: string | null;
   lastError: string | null;
   createdAt: string;
   updatedAt: string;
@@ -73,13 +78,15 @@ export class OperationalOutboxRepository {
     const nowIso = now.toISOString();
     const leaseUntil = new Date(now.getTime() + Math.max(0, leaseMs)).toISOString();
     const scope = organizationId === undefined ? '' : ' AND organization_id = ?';
-    const params: Array<string | number> = [nowIso];
+    const params: Array<string | number> = [MAX_OUTBOX_ATTEMPTS, nowIso, nowIso];
     if (organizationId !== undefined) params.push(organizationId);
     const event = this.db.transaction(() => {
       const row = this.db.prepare(`
         SELECT id FROM worker_outbox
-        WHERE status IN ('PENDING', 'FAILED', 'PROCESSING')
-          AND (lease_until IS NULL OR lease_until <= ?)
+        WHERE (
+          (status IN ('PENDING', 'FAILED') AND attempts < ? AND (next_retry_at IS NULL OR next_retry_at <= ?))
+          OR (status = 'PROCESSING' AND lease_until IS NOT NULL AND lease_until <= ?)
+        )
           ${scope}
         ORDER BY id ASC LIMIT 1
       `).get(...params) as { id: number } | undefined;
@@ -87,8 +94,11 @@ export class OperationalOutboxRepository {
       const updated = this.db.prepare(`
         UPDATE worker_outbox
         SET status = 'PROCESSING', lease_owner = ?, lease_until = ?, attempts = attempts + 1, updated_at = ?
-        WHERE id = ? AND status IN ('PENDING', 'FAILED', 'PROCESSING') AND (lease_until IS NULL OR lease_until <= ?)
-      `).run(owner, leaseUntil, nowIso, row.id, nowIso);
+        WHERE id = ? AND (
+          (status IN ('PENDING', 'FAILED') AND attempts < ? AND (next_retry_at IS NULL OR next_retry_at <= ?))
+          OR (status = 'PROCESSING' AND lease_until IS NOT NULL AND lease_until <= ?)
+        )
+      `).run(owner, leaseUntil, nowIso, row.id, MAX_OUTBOX_ATTEMPTS, nowIso, nowIso);
       return updated.changes > 0 ? this.find(row.id) : undefined;
     })();
     return event;
@@ -101,18 +111,24 @@ export class OperationalOutboxRepository {
     if (owner) params.push(owner);
     return this.db.prepare(`
       UPDATE worker_outbox
-      SET status = 'COMPLETED', lease_owner = NULL, lease_until = NULL, completed_at = ?, updated_at = ?
+      SET status = 'COMPLETED', lease_owner = NULL, lease_until = NULL, next_retry_at = NULL, completed_at = ?, updated_at = ?
       WHERE id = ?${ownerCondition} AND status = 'PROCESSING'
     `).run(...params).changes > 0;
   }
 
   fail(id: number, error: string, owner?: string): boolean {
-    const params: Array<string | number> = [error.slice(0, 500), new Date().toISOString(), id];
+    const now = new Date();
+    const current = this.find(id);
+    if (!current) return false;
+    const nextRetryAt = current.attempts >= MAX_OUTBOX_ATTEMPTS
+      ? null
+      : new Date(now.getTime() + retryDelayMs(current.attempts)).toISOString();
+    const params: Array<string | number | null> = [error.slice(0, 500), nextRetryAt, now.toISOString(), id];
     const ownerCondition = owner ? ' AND lease_owner = ?' : '';
     if (owner) params.push(owner);
     return this.db.prepare(`
       UPDATE worker_outbox
-      SET status = 'FAILED', last_error = ?, lease_owner = NULL, lease_until = NULL, updated_at = ?
+      SET status = 'FAILED', last_error = ?, next_retry_at = ?, lease_owner = NULL, lease_until = NULL, updated_at = ?
       WHERE id = ?${ownerCondition} AND status = 'PROCESSING'
     `).run(...params).changes > 0;
   }
@@ -134,6 +150,7 @@ interface OutboxRow {
   attempts: number;
   lease_owner: string | null;
   lease_until: string | null;
+  next_retry_at: string | null;
   last_error: string | null;
   created_at: string;
   updated_at: string;
@@ -152,6 +169,7 @@ function mapRow(row: OutboxRow): OperationalOutboxEvent {
     attempts: row.attempts,
     leaseOwner: row.lease_owner,
     leaseUntil: row.lease_until,
+    nextRetryAt: row.next_retry_at,
     lastError: row.last_error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -161,4 +179,8 @@ function mapRow(row: OutboxRow): OperationalOutboxEvent {
 
 function parse(value: string): unknown {
   try { return JSON.parse(value) as unknown; } catch { return {}; }
+}
+
+function retryDelayMs(attempts: number): number {
+  return Math.min(OUTBOX_RETRY_MAX_MS, OUTBOX_RETRY_BASE_MS * 2 ** Math.max(0, attempts - 1));
 }

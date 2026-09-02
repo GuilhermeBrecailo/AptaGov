@@ -77,11 +77,19 @@ export class JobRepository {
     if (result.changes > 0) return { id: Number(result.lastInsertRowid), created: true };
     if (!operationalKey) throw new Error('Não foi possível reservar o job');
     const existing = this.db.prepare(`
-      SELECT id FROM job_runs
-      WHERE type = ? AND operational_key = ? AND status IN ('PENDING', 'RUNNING')
+      SELECT id, status FROM job_runs
+      WHERE type = ? AND operational_key = ?
       ORDER BY id ASC LIMIT 1
-    `).get(type, operationalKey) as { id: number } | undefined;
+    `).get(type, operationalKey) as { id: number; status: JobStatus } | undefined;
     if (!existing) throw new Error('Job operacional não encontrado após conflito de reserva');
+    if (existing.status === 'FAILED') {
+      this.db.prepare(`
+        UPDATE job_runs
+        SET status = 'PENDING', error_message = NULL, started_at = NULL, finished_at = NULL,
+          lease_owner = NULL, lease_until = NULL
+        WHERE id = ? AND status = 'FAILED'
+      `).run(existing.id);
+    }
     return { id: existing.id, created: false };
   }
 
@@ -98,17 +106,7 @@ export class JobRepository {
       "((status = 'PENDING') OR (status = 'RUNNING' AND lease_until IS NOT NULL AND lease_until <= ?))",
     ];
     const params: Array<string | number | null> = [id, nowIso];
-    if (tenant?.organizationId !== undefined) {
-      conditions.push('tenant_organization_id = ?');
-      params.push(tenant.organizationId);
-    }
-    if (tenant?.radarId !== undefined) {
-      if (tenant.radarId === null) conditions.push('tenant_radar_id IS NULL');
-      else {
-        conditions.push('tenant_radar_id = ?');
-        params.push(tenant.radarId);
-      }
-    }
+    addTenantConditions(conditions, params, tenant);
     const result = this.db.prepare(`
       UPDATE job_runs
       SET status = 'RUNNING', started_at = COALESCE(started_at, ?),
@@ -188,20 +186,9 @@ export class JobRepository {
       conditions.push('status = ?');
       params.push(status);
     }
-    if (tenant?.organizationId !== undefined) {
-      conditions.push('tenant_organization_id = ?');
-      params.push(tenant.organizationId);
-    }
-    if (tenant?.radarId !== undefined) {
-      if (tenant.radarId === null) conditions.push('tenant_radar_id IS NULL');
-      else {
-        conditions.push('tenant_radar_id = ?');
-        params.push(tenant.radarId);
-      }
-    }
     const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
     const rows = this.db.prepare(`SELECT * FROM job_runs${where} ORDER BY id ASC`).all(...params) as JobRow[];
-    return rows.map(mapRow);
+    return rows.map(mapRow).filter((job) => matchesTenant(job, tenant));
   }
 
   find(id: number): JobRecord | undefined {
@@ -233,8 +220,8 @@ function mapRow(row: JobRow): JobRecord {
     key: operationalKey ?? null,
     leaseOwner: row.lease_owner,
     leaseUntil: row.lease_until,
-    tenantOrganizationId: row.tenant_organization_id,
-    tenantRadarId: row.tenant_radar_id,
+    tenantOrganizationId: row.tenant_organization_id ?? readNumber(checkpoint.organizationId) ?? null,
+    tenantRadarId: row.tenant_radar_id ?? readNumber(checkpoint.radarId) ?? null,
   };
 }
 
@@ -258,4 +245,30 @@ function readString(value: unknown): string | undefined {
 
 function readNumber(value: unknown): number | null | undefined {
   return typeof value === 'number' && Number.isInteger(value) ? value : undefined;
+}
+
+const effectiveOrganization = "COALESCE(tenant_organization_id, CASE WHEN json_valid(checkpoint_json) AND json_type(checkpoint_json, '$.organizationId') = 'integer' THEN json_extract(checkpoint_json, '$.organizationId') END)";
+const effectiveRadar = "COALESCE(tenant_radar_id, CASE WHEN json_valid(checkpoint_json) AND json_type(checkpoint_json, '$.radarId') = 'integer' THEN json_extract(checkpoint_json, '$.radarId') END)";
+
+function addTenantConditions(conditions: string[], params: Array<string | number | null>, tenant?: JobTenant): void {
+  if (tenant?.organizationId !== undefined) {
+    if (tenant.organizationId === null) conditions.push(`${effectiveOrganization} IS NULL`);
+    else {
+      conditions.push(`${effectiveOrganization} = ?`);
+      params.push(tenant.organizationId);
+    }
+  }
+  if (tenant?.radarId !== undefined) {
+    if (tenant.radarId === null) conditions.push(`${effectiveRadar} IS NULL`);
+    else {
+      conditions.push(`${effectiveRadar} = ?`);
+      params.push(tenant.radarId);
+    }
+  }
+}
+
+function matchesTenant(job: JobRecord, tenant?: JobTenant): boolean {
+  if (tenant?.organizationId !== undefined && job.tenantOrganizationId !== tenant.organizationId) return false;
+  if (tenant?.radarId !== undefined && job.tenantRadarId !== tenant.radarId) return false;
+  return true;
 }
