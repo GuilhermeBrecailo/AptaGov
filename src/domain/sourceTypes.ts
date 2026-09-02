@@ -44,6 +44,8 @@ export interface MarketObservationInput {
   totalPriceCents?: number | null;
   organization?: string;
   state?: string;
+  modality?: string | null;
+  status?: string | null;
   observedAt: string;
   sourceUrl: string;
   opportunityId?: number | null;
@@ -62,6 +64,7 @@ export interface MarketResultInput {
   totalPriceCents?: number | null;
   organization?: string;
   state?: string;
+  modality?: string | null;
   opportunityId?: number | null;
   winner?: string | null;
   awardedPriceCents?: number | null;

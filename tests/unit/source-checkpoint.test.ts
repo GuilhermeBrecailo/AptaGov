@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { createTestDatabase } from '../../src/db/database';
 import type { MarketObservationInput, MarketResultInput, SourceQuery, SourceWindow } from '../../src/domain/sourceTypes';
 import type { OpportunityInput } from '../../src/domain/types';
-import { PncpSourceClient, syncSourceOpportunities } from '../../src/integrations/sources/OfficialSourceClient';
+import { PncpSourceClient, syncSourceMarket, syncSourceOpportunities } from '../../src/integrations/sources/OfficialSourceClient';
+import { MarketRepository } from '../../src/repositories/marketRepository';
+import { MarketIntelligenceService } from '../../src/services/marketIntelligenceService';
 import { OpportunityRepository } from '../../src/repositories/opportunityRepository';
 import { SourceSyncRepository } from '../../src/repositories/sourceSyncRepository';
 
@@ -253,6 +255,24 @@ describe('checkpoints de fontes oficiais', () => {
     expect(repository.listMarketResults('BEC/SP')).toHaveLength(0);
   });
 
+  it('exige URL oficial não vazia para persistir registros comparáveis', () => {
+    const db = createTestDatabase();
+    const repository = new SourceSyncRepository(db);
+
+    expect(() => repository.persistMarketPage({
+      sourceCode: 'BEC/SP',
+      window,
+      items: [marketObservation(1_000), { ...marketObservation(1_100), externalId: 'without-source', sourceUrl: '' }],
+    })).toThrow(/sourceUrl/i);
+    expect(() => repository.persistMarketResultsPage({
+      sourceCode: 'BEC/SP',
+      window,
+      items: [{ ...marketResult(1_000), sourceUrl: '   ' }],
+    })).toThrow(/sourceUrl/i);
+    expect(repository.listMarketObservations('BEC/SP')).toHaveLength(0);
+    expect(repository.listMarketResults('BEC/SP')).toHaveLength(0);
+  });
+
   it('preserva cursor ao registrar falha e grava source_runs', () => {
     const db = createTestDatabase();
     const repository = new SourceSyncRepository(db);
@@ -305,5 +325,54 @@ describe('checkpoints de fontes oficiais', () => {
     expect(requestedPages).toEqual([3]);
     expect(opportunities.count()).toBe(3);
     expect(repository.getCheckpoint('PNCP', window)).toMatchObject({ cursor: null, status: 'COMPLETED' });
+  });
+
+  it('integra adapter oficial, resultados homologados, persistência, resumo e checkpoint', async () => {
+    const db = createTestDatabase();
+    const repository = new SourceSyncRepository(db);
+    const adapter = new PncpSourceClient({
+      sourceClient: {
+        fetchPublishedPage: async () => ({
+          data: [{
+            numeroControlePNCP: 'pncp-market-1',
+            objetoCompra: 'Serviço de suporte',
+            modalidadeNome: 'Pregão eletrônico',
+            situacaoCompra: 'HOMOLOGADO',
+            dataResultado: '2026-08-31T10:00:00.000Z',
+            linkSistemaOrigem: 'https://pncp.gov.br/resultado/pncp-market-1',
+            itens: [{
+              codigoItem: '12345',
+              descricaoItem: 'Serviço de suporte',
+              unidadeFornecimento: 'UN',
+              quantidade: 1,
+              valorHomologado: 120,
+              valorTotalHomologado: 120,
+              nomeRazaoSocialFornecedor: 'Fornecedor homologado',
+            }],
+          }],
+          totalPaginas: 1,
+          numeroPagina: 1,
+        }),
+      },
+    });
+
+    const result = await syncSourceMarket(adapter, sourceQuery, repository);
+    const summary = new MarketIntelligenceService(new MarketRepository(db), { minimumObservations: 1 }).getMarketSummary({
+      ...window,
+      itemCode: '12345',
+      normalizedDescription: 'servico de suporte',
+      unit: 'UN',
+    });
+
+    expect(result).toMatchObject({ received: 2, persisted: 2, created: 2, updated: 0 });
+    expect(repository.listMarketResults('PNCP')).toMatchObject([{
+      awardedPriceCents: 12_000,
+      winner: 'Fornecedor homologado',
+    }]);
+    expect(repository.getCheckpoint('PNCP', window)).toMatchObject({ status: 'COMPLETED', cursor: null });
+    expect(summary).toMatchObject({ state: 'READY', observationCount: 1, medianPriceCents: 12_000, purchaseCount: 1 });
+    expect(summary.sourceLinks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ url: 'https://pncp.gov.br/resultado/pncp-market-1', externalId: 'pncp-market-1' }),
+    ]));
   });
 });

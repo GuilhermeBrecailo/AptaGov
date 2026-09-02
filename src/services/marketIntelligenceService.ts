@@ -18,6 +18,11 @@ export interface MarketSourceLink {
   externalId: string;
   observedAt: string;
   recordType: 'OBSERVATION' | 'RESULT';
+  winner: string | null;
+  awardedPriceCents: number | null;
+  quantity: number;
+  unit: string;
+  totalPriceCents: number | null;
 }
 
 export interface MonthlyMarketSeries {
@@ -78,13 +83,17 @@ export class MarketIntelligenceService {
 
   getMarketSummary(query: MarketSummaryQuery = {}): MarketSummary {
     const range = resolveRange(query, this.lookbackDays);
-    const records = deduplicate(this.repository.list({ ...query, ...range }));
+    const records = deduplicate(this.repository.list({ ...query, ...range }).filter(hasSourceUrl));
     const compatibleRecords = selectCompatibleRecords(records, query);
-    const pricedRecords = compatibleRecords.filter(hasUnitPrice);
+    const pricedRecords = compatibleRecords.flatMap((record) => {
+      const priceCents = comparablePriceCents(record);
+      return priceCents === null ? [] : [{ record, priceCents }];
+    });
     const enoughData = pricedRecords.length >= this.minimumObservations;
-    const minPriceCents = enoughData ? Math.min(...pricedRecords.map((record) => record.unitPriceCents!)) : null;
-    const medianPriceCents = enoughData ? median(pricedRecords.map((record) => record.unitPriceCents!)) : null;
-    const maxPriceCents = enoughData ? Math.max(...pricedRecords.map((record) => record.unitPriceCents!)) : null;
+    const prices = pricedRecords.map((record) => record.priceCents);
+    const minPriceCents = enoughData ? Math.min(...prices) : null;
+    const medianPriceCents = enoughData ? median(prices) : null;
+    const maxPriceCents = enoughData ? Math.max(...prices) : null;
     const monthlySeries = monthlySummary(pricedRecords, range.dateFrom, range.dateTo);
     const sourceLinks = linksFor(compatibleRecords);
     const message = enoughData ? null : 'Dados insuficientes para uma referência segura neste recorte.';
@@ -167,9 +176,13 @@ export function median(values: number[]): number | null {
 }
 
 function resolveRange(query: MarketSummaryQuery, lookbackDays: number): { dateFrom: string; dateTo: string } {
-  const dateTo = query.dateTo ?? new Date().toISOString();
+  const dateTo = normalizeDateTo(query.dateTo ?? new Date().toISOString());
   const dateFrom = query.dateFrom ?? new Date(new Date(dateTo).getTime() - lookbackDays * 24 * 60 * 60 * 1_000).toISOString();
   return { dateFrom, dateTo };
+}
+
+function normalizeDateTo(value: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T23:59:59.999Z` : value;
 }
 
 function selectCompatibleRecords(records: MarketRecord[], query: MarketSummaryQuery): MarketRecord[] {
@@ -201,23 +214,39 @@ function deduplicate(records: MarketRecord[]): MarketRecord[] {
 }
 
 function recordRank(record: MarketRecord): number {
-  return (record.unitPriceCents === null ? 0 : 10)
+  return (isValidCents(record.unitPriceCents) ? 100 : comparablePriceCents(record) === null ? 0 : 10)
     + (record.recordType === 'RESULT' ? 2 : 0)
     + (record.status ? 1 : 0)
+    + (record.winner ? 1 : 0)
     + (record.sourceUrl ? 1 : 0);
 }
 
-function hasUnitPrice(record: MarketRecord): boolean {
-  return Number.isSafeInteger(record.unitPriceCents) && (record.unitPriceCents ?? -1) >= 0;
+function hasSourceUrl(record: MarketRecord): boolean {
+  return Boolean(record.sourceUrl?.trim());
 }
 
-function monthlySummary(records: MarketRecord[], dateFrom: string, dateTo: string): MonthlyMarketSeries[] {
+function comparablePriceCents(record: MarketRecord): number | null {
+  if (isValidCents(record.unitPriceCents)) return record.unitPriceCents;
+  const awardedPriceCents = record.awardedPriceCents;
+  if (!isValidCents(awardedPriceCents) || !Number.isFinite(record.quantity) || record.quantity <= 0) return null;
+  if (record.quantity === 1) return awardedPriceCents;
+  if (isValidCents(record.totalPriceCents) && record.totalPriceCents === awardedPriceCents) {
+    return Math.round(awardedPriceCents / record.quantity);
+  }
+  return null;
+}
+
+function isValidCents(value: number | null): value is number {
+  return value !== null && Number.isSafeInteger(value) && value >= 0;
+}
+
+function monthlySummary(records: Array<{ record: MarketRecord; priceCents: number }>, dateFrom: string, dateTo: string): MonthlyMarketSeries[] {
   const start = monthStart(new Date(dateFrom));
   const end = monthStart(new Date(dateTo));
   const output: MonthlyMarketSeries[] = [];
   for (const cursor = new Date(start); cursor <= end; cursor.setUTCMonth(cursor.getUTCMonth() + 1)) {
     const month = monthKey(cursor);
-    const prices = records.filter((record) => monthKey(new Date(record.observedAt)) === month).map((record) => record.unitPriceCents!);
+    const prices = records.filter(({ record }) => monthKey(new Date(record.observedAt)) === month).map(({ priceCents }) => priceCents);
     output.push({ month, count: prices.length, medianPriceCents: median(prices) });
   }
   return output;
@@ -243,6 +272,11 @@ function linksFor(records: MarketRecord[]): MarketSourceLink[] {
       externalId: record.externalId,
       observedAt: record.observedAt,
       recordType: record.recordType,
+      winner: record.winner,
+      awardedPriceCents: record.awardedPriceCents,
+      quantity: record.quantity,
+      unit: record.unit,
+      totalPriceCents: record.totalPriceCents,
     });
   }
   return [...links.values()];

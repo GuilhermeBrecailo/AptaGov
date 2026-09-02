@@ -4,10 +4,12 @@ import {
   BecSpClient,
   OpenDataSourceClient,
   PncpSourceClient,
+  parseMarketMoneyToCents,
   runSourcesIndependently,
 } from '../../src/integrations/sources/OfficialSourceClient';
-import { createSourceRegistry } from '../../src/integrations/sources/sourceRegistry';
+import { createDefaultSourceRegistry, createSourceRegistry, sourceRegistry } from '../../src/integrations/sources/sourceRegistry';
 import { sourceLabel } from '../../src/domain/sourceTypes';
+import { loadEnv } from '../../src/config/env';
 
 const filters: FilterConfig = {
   lookbackDays: 3,
@@ -85,6 +87,62 @@ describe('contrato de fontes oficiais', () => {
     expect(page.items).toHaveLength(2);
   });
 
+  it('expõe resultados homologados e itens do payload oficial com vencedor, awarded e rastreabilidade', async () => {
+    const client = new PncpSourceClient({
+      sourceClient: {
+        fetchPublishedPage: async () => ({
+          data: [{
+            numeroControlePNCP: 'pncp-result-1',
+            objetoCompra: 'Serviço de suporte',
+            modalidadeNome: 'Pregão eletrônico',
+            situacaoCompra: 'HOMOLOGADO',
+            dataResultado: '2026-08-31T10:00:00.000Z',
+            linkSistemaOrigem: 'https://pncp.gov.br/resultado/pncp-result-1',
+            orgaoEntidade: { razaoSocial: 'Órgão oficial' },
+            unidadeOrgao: { ufSigla: 'SP', municipioNome: 'São Paulo' },
+            itens: [{
+              codigoItem: 'ITEM-1',
+              descricaoItem: 'Serviço de suporte',
+              unidadeFornecimento: 'UN',
+              quantidade: 1,
+              valorTotalHomologado: 125.5,
+              valorHomologado: 125.5,
+              nomeRazaoSocialFornecedor: 'Fornecedor vencedor',
+            }],
+            totalPaginas: 1,
+          }],
+          totalPaginas: 1,
+          numeroPagina: 1,
+        }),
+      },
+    });
+
+    const page = await client.listMarketResults(query);
+
+    expect(page.items).toMatchObject([{
+      sourceCode: 'PNCP',
+      externalId: 'pncp-result-1',
+      itemCode: 'ITEM-1',
+      normalizedDescription: 'servico de suporte',
+      unit: 'UN',
+      quantity: 1,
+      unitPriceCents: null,
+      totalPriceCents: 12_550,
+      awardedPriceCents: 12_550,
+      winner: 'Fornecedor vencedor',
+      modality: 'Pregão eletrônico',
+      status: 'HOMOLOGADO',
+      sourceUrl: 'https://pncp.gov.br/resultado/pncp-result-1',
+    }]);
+  });
+
+  it('não converte texto monetário vazio ou inválido em zero e aceita zero explícito', () => {
+    expect(parseMarketMoneyToCents('')).toBeNull();
+    expect(parseMarketMoneyToCents('não informado')).toBeNull();
+    expect(parseMarketMoneyToCents('R$ 0,00')).toBe(0);
+    expect(parseMarketMoneyToCents(0)).toBe(0);
+  });
+
   it('expõe labels canônicas sem alterar os códigos persistidos', () => {
     expect(sourceLabel('PNCP')).toBe('PNCP');
     expect(sourceLabel('OPEN_DATA')).toBe('Dados Abertos');
@@ -135,6 +193,7 @@ describe('contrato de fontes oficiais', () => {
         QUANTIDADE: '2',
         MenorValor: '10,50',
         VL_TOTAL_NEGOCIADO: '21,00',
+        NOME_FORNECEDOR: 'Fornecedor BEC',
       }],
     };
     const client = new BecSpClient({
@@ -180,6 +239,16 @@ describe('contrato de fontes oficiais', () => {
       totalPriceCents: 2_100,
       organization: 'Órgão BEC',
       state: 'SP',
+      modality: 'Pregão Eletrônico',
+      status: 'Encerrada(o) com Vencedor',
+      sourceUrl: 'https://www.bec.sp.gov.br/edital/oc-15',
+    });
+
+    const results = await client.listMarketResults(query);
+    expect(results.items[0]).toMatchObject({
+      winner: expect.any(String),
+      awardedPriceCents: 2_100,
+      sourceUrl: 'https://www.bec.sp.gov.br/edital/oc-15',
     });
   });
 
@@ -241,5 +310,13 @@ describe('contrato de fontes oficiais', () => {
     await clients[2]!.listOpportunities(query);
     expect(requestedUrl).toContain('https://bec.example.test/BEC_API/API/pregaoM/NegociacaoItemOC/');
     expect(createSourceRegistry().map((client) => client.id)).toEqual(['PNCP', 'OPEN_DATA']);
+  });
+
+  it('constrói o registry padrão a partir de BEC_SP_ENABLED do ambiente', () => {
+    expect(sourceRegistry.map((client) => client.id)).toEqual(['PNCP', 'OPEN_DATA']);
+    expect(createDefaultSourceRegistry(loadEnv({ NODE_ENV: 'test', DATABASE_URL: ':memory:' })).map((client) => client.id))
+      .toEqual(['PNCP', 'OPEN_DATA']);
+    expect(createDefaultSourceRegistry(loadEnv({ NODE_ENV: 'test', DATABASE_URL: ':memory:', BEC_SP_ENABLED: 'true' })).map((client) => client.id))
+      .toEqual(['PNCP', 'OPEN_DATA', 'BEC/SP']);
   });
 });

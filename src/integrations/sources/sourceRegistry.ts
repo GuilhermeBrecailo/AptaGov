@@ -1,5 +1,6 @@
 import { OpenDataClient } from '../pncp/OpenDataClient';
 import { PncpClient } from '../pncp/PncpClient';
+import { loadEnv, type AppEnv } from '../../config/env';
 import { BecSpClient, type BecSpClientOptions } from './BecSpClient';
 import {
   OpenDataSourceClient,
@@ -14,6 +15,8 @@ export interface SourceRegistryOptions {
   becSp?: BecSpClientOptions;
   becSpEnabled?: boolean;
 }
+
+export type SourceRegistryEnvironment = Pick<AppEnv, 'becSpEnabled'>;
 
 export function createSourceRegistry(options: SourceRegistryOptions = {}): PagedOfficialSourceClient[] {
   const pncpClient = new PncpClient(options.pncpClient ?? {
@@ -40,4 +43,8 @@ export function createSourceRegistry(options: SourceRegistryOptions = {}): Paged
   return clients;
 }
 
-export const sourceRegistry = createSourceRegistry();
+export function createDefaultSourceRegistry(env: SourceRegistryEnvironment = loadEnv()): PagedOfficialSourceClient[] {
+  return createSourceRegistry({ becSpEnabled: env.becSpEnabled });
+}
+
+export const sourceRegistry = createDefaultSourceRegistry();

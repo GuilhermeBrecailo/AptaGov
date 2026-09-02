@@ -138,6 +138,26 @@ describe('inteligência de mercado', () => {
     expect(summary).toMatchObject({ state: 'READY', observationCount: 1, medianPriceCents: 2_500, purchaseCount: 1 });
   });
 
+  it('usa awarded como comparável quando o item unitário tem quantidade um e preserva vencedor', () => {
+    const { db, service } = serviceWithSeed([], [result({
+      externalId: 'awarded-only',
+      unitPriceCents: null,
+      totalPriceCents: 7_500,
+      awardedPriceCents: 7_500,
+      quantity: 1,
+      winner: 'Fornecedor homologado',
+    })]);
+
+    const record = new MarketRepository(db).list()[0];
+    const summary = service.getMarketSummary({ ...period, itemCode: 'ITEM-1', normalizedDescription: 'servico de suporte', unit: 'UN' });
+
+    expect(record).toMatchObject({ winner: 'Fornecedor homologado', awardedPriceCents: 7_500 });
+    expect(summary).toMatchObject({ state: 'READY', observationCount: 1, medianPriceCents: 7_500 });
+    expect(summary.sourceLinks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ winner: 'Fornecedor homologado', awardedPriceCents: 7_500 }),
+    ]));
+  });
+
   it('retorna INSUFFICIENT_DATA sem estimativas quando a amostra é menor que o mínimo', () => {
     const { service } = serviceWithSeed([observation()], [], 3);
 
@@ -189,6 +209,19 @@ describe('inteligência de mercado', () => {
     expect(summary.auditLinks).toEqual(expect.arrayContaining([
       expect.objectContaining({ externalId: 'r1', url: 'https://pncp.gov.br/resultado/r1' }),
     ]));
+  });
+
+  it('persiste modalidade e situação fornecidas pela observação nos breakdowns reais', () => {
+    const { service } = serviceWithSeed([observation({
+      externalId: 'observation-metadata',
+      modality: 'Dispensa eletrônica',
+      status: 'HOMOLOGADO',
+    })]);
+
+    const summary = service.getMarketSummary({ ...period, itemCode: 'ITEM-1', normalizedDescription: 'servico de suporte', unit: 'UN' });
+
+    expect(summary.modalityBreakdown).toEqual([{ label: 'Dispensa eletrônica', count: 1 }]);
+    expect(summary.statusBreakdown).toEqual([{ label: 'HOMOLOGADO', count: 1 }]);
   });
 
   it('aplica período, estado, órgão, descrição e código com filtros parametrizados', () => {

@@ -64,6 +64,15 @@ export interface PersistMarketResultsPageInput {
   items: MarketResultInput[];
 }
 
+export interface PersistMarketBundlePageInput {
+  sourceCode: SourceId;
+  window: SourceWindow;
+  cursor: string | null;
+  nextCursor: string | null;
+  observations: MarketObservationInput[];
+  results: MarketResultInput[];
+}
+
 interface CheckpointRow {
   source_code: SourceId;
   window_start: string;
@@ -189,11 +198,49 @@ export class SourceSyncRepository {
   }
 
   persistMarketPage(input: PersistMarketPageInput): { created: number; updated: number } {
-    assertSourceItems(input.sourceCode, input.items);
-    return this.db.transaction(() => {
-      let created = 0;
-      let updated = 0;
-      const statement = this.db.prepare(`
+    assertMarketItems(input.sourceCode, input.items);
+    return this.db.transaction(() => this.persistMarketObservations(input.items, input.sourceCode))();
+  }
+
+  persistMarketResultsPage(input: PersistMarketResultsPageInput): { created: number; updated: number } {
+    assertMarketItems(input.sourceCode, input.items);
+    return this.db.transaction(() => this.persistMarketResults(input.items, input.sourceCode))();
+  }
+
+  persistMarketBundlePage(input: PersistMarketBundlePageInput): PersistPageResult {
+    assertMarketItems(input.sourceCode, input.observations);
+    assertMarketItems(input.sourceCode, input.results);
+    const result = this.db.transaction(() => {
+      this.ensureCheckpoint(input.sourceCode, input.window, input.cursor);
+      const observations = this.persistMarketObservations(input.observations, input.sourceCode);
+      const results = this.persistMarketResults(input.results, input.sourceCode);
+      const now = new Date().toISOString();
+      this.advanceCheckpoint(
+        input.sourceCode,
+        input.window,
+        input.nextCursor,
+        input.observations.length + input.results.length,
+        input.observations.length + input.results.length,
+        observations.created + results.created,
+        observations.updated + results.updated,
+        now,
+      );
+      return {
+        created: observations.created + results.created,
+        updated: observations.updated + results.updated,
+      };
+    })();
+
+    return {
+      ...result,
+      checkpoint: this.getCheckpoint(input.sourceCode, input.window) as SourceCheckpoint,
+    };
+  }
+
+  private persistMarketObservations(items: MarketObservationInput[], sourceCode: SourceId): { created: number; updated: number } {
+    let created = 0;
+    let updated = 0;
+    const statement = this.db.prepare(`
         INSERT INTO market_observations (
           source_code, external_id, item_code, normalized_description, unit, quantity,
           unit_price_cents, total_price_cents, organization, state, observed_at,
@@ -221,12 +268,12 @@ export class SourceSyncRepository {
         SELECT 1 FROM market_observations
         WHERE source_code = ? AND external_id = ? AND item_code = ?
       `);
-      for (const item of input.items) {
+    for (const item of items) {
         const now = new Date().toISOString();
         const itemCode = item.itemCode ?? '';
-        const alreadyExists = exists.get(input.sourceCode, item.externalId, itemCode) !== undefined;
+        const alreadyExists = exists.get(sourceCode, item.externalId, itemCode) !== undefined;
         const result = statement.run({
-          sourceCode: input.sourceCode,
+          sourceCode,
           externalId: item.externalId,
           itemCode,
           normalizedDescription: item.normalizedDescription.trim(),
@@ -238,23 +285,20 @@ export class SourceSyncRepository {
           state: item.state?.trim() ?? '',
           observedAt: item.observedAt,
           opportunityId: item.opportunityId ?? null,
-          sourceUrl: item.sourceUrl,
-          rawJson: JSON.stringify(sanitizePayload(item.raw ?? {})),
+          sourceUrl: item.sourceUrl.trim(),
+          rawJson: JSON.stringify(marketRawJson(item.raw, { modality: item.modality, status: item.status })),
           now,
         });
         if (result.changes === 1 && !alreadyExists) created += 1;
         else updated += 1;
-      }
-      return { created, updated };
-    })();
+    }
+    return { created, updated };
   }
 
-  persistMarketResultsPage(input: PersistMarketResultsPageInput): { created: number; updated: number } {
-    assertSourceItems(input.sourceCode, input.items);
-    return this.db.transaction(() => {
-      let created = 0;
-      let updated = 0;
-      const statement = this.db.prepare(`
+  private persistMarketResults(items: MarketResultInput[], sourceCode: SourceId): { created: number; updated: number } {
+    let created = 0;
+    let updated = 0;
+    const statement = this.db.prepare(`
         INSERT INTO market_results (
           source_code, external_id, item_code, normalized_description, unit, quantity,
           unit_price_cents, total_price_cents, organization, state, opportunity_id,
@@ -285,12 +329,12 @@ export class SourceSyncRepository {
         SELECT 1 FROM market_results
         WHERE source_code = ? AND external_id = ? AND item_code = ?
       `);
-      for (const item of input.items) {
+    for (const item of items) {
         const now = new Date().toISOString();
         const itemCode = item.itemCode ?? '';
-        const alreadyExists = exists.get(input.sourceCode, item.externalId, itemCode) !== undefined;
+        const alreadyExists = exists.get(sourceCode, item.externalId, itemCode) !== undefined;
         const result = statement.run({
-          sourceCode: input.sourceCode,
+          sourceCode,
           externalId: item.externalId,
           itemCode,
           normalizedDescription: item.normalizedDescription.trim(),
@@ -305,15 +349,14 @@ export class SourceSyncRepository {
           awardedPriceCents: item.awardedPriceCents ?? null,
           status: item.status ?? null,
           observedAt: item.observedAt,
-          sourceUrl: item.sourceUrl,
-          rawJson: JSON.stringify(sanitizePayload(item.raw ?? {})),
+          sourceUrl: item.sourceUrl.trim(),
+          rawJson: JSON.stringify(marketRawJson(item.raw, { modality: item.modality })),
           now,
         });
         if (result.changes === 1 && !alreadyExists) created += 1;
         else updated += 1;
-      }
-      return { created, updated };
-    })();
+    }
+    return { created, updated };
   }
 
   listMarketObservations(sourceCode?: SourceId): Array<{
@@ -485,6 +528,45 @@ export class SourceSyncRepository {
         updated_at = excluded.updated_at
     `).run(sourceCode, window.dateFrom, window.dateTo, cursor, now, now);
   }
+
+  private advanceCheckpoint(
+    sourceCode: SourceId,
+    window: SourceWindow,
+    cursor: string | null,
+    received: number,
+    persisted: number,
+    created: number,
+    updated: number,
+    now: string,
+  ): void {
+    this.db.prepare(`
+      UPDATE source_checkpoints
+      SET cursor = ?,
+          status = ?,
+          received_count = received_count + ?,
+          persisted_count = persisted_count + ?,
+          created_count = created_count + ?,
+          updated_count = updated_count + ?,
+          error_category = NULL,
+          last_success_at = CASE WHEN ? = 'COMPLETED' THEN ? ELSE last_success_at END,
+          next_retry_at = NULL,
+          updated_at = ?
+      WHERE source_code = ? AND window_start = ? AND window_end = ?
+    `).run(
+      cursor,
+      cursor === null ? 'COMPLETED' : 'RUNNING',
+      received,
+      persisted,
+      created,
+      updated,
+      cursor === null ? 'COMPLETED' : 'RUNNING',
+      now,
+      now,
+      sourceCode,
+      window.dateFrom,
+      window.dateTo,
+    );
+  }
 }
 
 function mapCheckpoint(row: CheckpointRow): SourceCheckpoint {
@@ -532,4 +614,50 @@ function assertSourceItems(
       throw new Error(`Page sourceCode ${sourceCode} does not match item sourceCode`);
     }
   }
+}
+
+function assertMarketItems(
+  sourceCode: SourceId,
+  items: Array<{
+    sourceCode?: SourceId;
+    source?: SourceId;
+    externalId: string;
+    normalizedDescription: string;
+    unit: string;
+    quantity: number;
+    unitPriceCents?: number | null;
+    totalPriceCents?: number | null;
+    awardedPriceCents?: number | null;
+    sourceUrl: string;
+  }>,
+): void {
+  assertSourceItems(sourceCode, items);
+  for (const item of items) {
+    if (!item.externalId?.trim()) throw new Error('Market item requires externalId');
+    if (!item.normalizedDescription?.trim()) throw new Error('Market item requires normalizedDescription');
+    if (!item.unit?.trim()) throw new Error('Market item requires unit');
+    if (!Number.isFinite(item.quantity) || item.quantity < 0) throw new Error('Market item requires a valid quantity');
+    if (!item.sourceUrl?.trim()) throw new Error('Market item requires sourceUrl');
+    for (const [field, value] of Object.entries({
+      unitPriceCents: item.unitPriceCents,
+      totalPriceCents: item.totalPriceCents,
+      awardedPriceCents: item.awardedPriceCents,
+    })) {
+      if (value !== null && value !== undefined && (!Number.isSafeInteger(value) || value < 0)) {
+        throw new Error(`Market item requires a valid ${field}`);
+      }
+    }
+  }
+}
+
+function marketRawJson(raw: unknown, metadata: { modality?: string | null; status?: string | null }): unknown {
+  const hasMetadata = Boolean(metadata.modality?.trim() || metadata.status?.trim());
+  const sanitized = sanitizePayload(raw ?? {});
+  if (!hasMetadata) return sanitized;
+  if (isRecord(sanitized)) return { ...sanitized, marketMetadata: metadata };
+  return { value: sanitized, marketMetadata: metadata };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

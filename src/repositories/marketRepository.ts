@@ -28,6 +28,8 @@ export interface MarketRecord {
   state: string;
   modality: string;
   status: string | null;
+  winner: string | null;
+  awardedPriceCents: number | null;
   observedAt: string;
   sourceUrl: string;
   opportunityId: number | null;
@@ -48,9 +50,12 @@ interface MarketRecordRow {
   state: string;
   modality: string;
   status: string | null;
+  winner: string | null;
+  awarded_price_cents: number | null;
   observed_at: string;
   source_url: string;
   opportunity_id: number | null;
+  raw_json: string;
 }
 
 export class MarketRepository {
@@ -79,9 +84,12 @@ export class MarketRepository {
           mo.state,
           COALESCE(o.modality, '') AS modality,
           NULL AS status,
+          NULL AS winner,
+          NULL AS awarded_price_cents,
           mo.observed_at,
           mo.source_url,
-          mo.opportunity_id
+          mo.opportunity_id,
+          mo.raw_json
         FROM market_observations mo
         LEFT JOIN opportunities o ON o.id = mo.opportunity_id
 
@@ -102,9 +110,12 @@ export class MarketRepository {
           mr.state,
           COALESCE(o.modality, '') AS modality,
           mr.status,
+          mr.winner,
+          mr.awarded_price_cents,
           mr.observed_at,
           mr.source_url,
-          mr.opportunity_id
+          mr.opportunity_id,
+          mr.raw_json
         FROM market_results mr
         LEFT JOIN opportunities o ON o.id = mr.opportunity_id
       ) market
@@ -112,7 +123,9 @@ export class MarketRepository {
       ORDER BY market.observed_at DESC, market.id DESC
     `).all(...params) as MarketRecordRow[];
 
-    return rows.map((row) => ({
+    return rows.map((row) => {
+      const metadata = marketMetadata(row.raw_json);
+      return {
       id: row.id,
       recordType: row.record_type,
       sourceCode: row.source_code,
@@ -125,12 +138,15 @@ export class MarketRepository {
       totalPriceCents: row.total_price_cents,
       organization: row.organization,
       state: row.state,
-      modality: row.modality,
-      status: row.status,
+      modality: metadata.modality ?? row.modality,
+      status: metadata.status ?? row.status,
+      winner: row.winner,
+      awardedPriceCents: row.awarded_price_cents,
       observedAt: row.observed_at,
       sourceUrl: row.source_url,
       opportunityId: row.opportunity_id,
-    }));
+      };
+    });
   }
 
   listMarketRecords(query: MarketRepositoryQuery = {}): MarketRecord[] {
@@ -171,4 +187,25 @@ function addFilters(conditions: string[], params: Array<string | number>, query:
 
 export function normalizeDescription(value: string): string {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function marketMetadata(rawJson: string): { modality: string | null; status: string | null } {
+  try {
+    const raw = JSON.parse(rawJson) as unknown;
+    if (!isRecord(raw) || !isRecord(raw.marketMetadata)) return { modality: null, status: null };
+    return {
+      modality: nonEmptyString(raw.marketMetadata.modality),
+      status: nonEmptyString(raw.marketMetadata.status),
+    };
+  } catch {
+    return { modality: null, status: null };
+  }
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
