@@ -55,6 +55,14 @@ export interface MarketResultInput {
   source?: SourceId;
   externalId: string;
   itemCode?: string | null;
+  normalizedDescription: string;
+  unit: string;
+  quantity: number;
+  unitPriceCents?: number | null;
+  totalPriceCents?: number | null;
+  organization?: string;
+  state?: string;
+  opportunityId?: number | null;
   winner?: string | null;
   awardedPriceCents?: number | null;
   status?: string | null;

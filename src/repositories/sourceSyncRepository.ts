@@ -1,6 +1,7 @@
 import type { SqliteDatabase } from '../db/database';
 import type {
   MarketObservationInput,
+  MarketResultInput,
   SourceId,
   SourceWindow,
 } from '../domain/sourceTypes';
@@ -57,6 +58,12 @@ export interface PersistMarketPageInput {
   items: MarketObservationInput[];
 }
 
+export interface PersistMarketResultsPageInput {
+  sourceCode: SourceId;
+  window: SourceWindow;
+  items: MarketResultInput[];
+}
+
 interface CheckpointRow {
   source_code: SourceId;
   window_start: string;
@@ -94,6 +101,29 @@ interface MarketObservationRow {
   updated_at: string;
 }
 
+interface MarketResultRow {
+  id: number;
+  source_code: SourceId;
+  external_id: string;
+  item_code: string;
+  normalized_description: string;
+  unit: string;
+  quantity: number;
+  unit_price_cents: number | null;
+  total_price_cents: number | null;
+  organization: string;
+  state: string;
+  opportunity_id: number | null;
+  winner: string | null;
+  awarded_price_cents: number | null;
+  status: string | null;
+  observed_at: string;
+  source_url: string;
+  raw_json: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PersistPageResult {
   created: number;
   updated: number;
@@ -107,6 +137,7 @@ export class SourceSyncRepository {
   ) {}
 
   persistOpportunityPage(input: PersistOpportunityPageInput): PersistPageResult {
+    assertSourceItems(input.sourceCode, input.items);
     const result = this.db.transaction(() => {
       this.ensureCheckpoint(input.sourceCode, input.window, input.cursor);
       let created = 0;
@@ -114,8 +145,8 @@ export class SourceSyncRepository {
       for (const item of input.items) {
         const persisted = this.opportunities.upsert({
           ...item,
-          source: item.source ?? input.sourceCode,
-          sourceCode: item.sourceCode ?? input.sourceCode,
+          source: input.sourceCode,
+          sourceCode: input.sourceCode,
         });
         if (persisted.created) created += 1;
         else updated += 1;
@@ -158,6 +189,7 @@ export class SourceSyncRepository {
   }
 
   persistMarketPage(input: PersistMarketPageInput): { created: number; updated: number } {
+    assertSourceItems(input.sourceCode, input.items);
     return this.db.transaction(() => {
       let created = 0;
       let updated = 0;
@@ -194,7 +226,7 @@ export class SourceSyncRepository {
         const itemCode = item.itemCode ?? '';
         const alreadyExists = exists.get(input.sourceCode, item.externalId, itemCode) !== undefined;
         const result = statement.run({
-          sourceCode: item.sourceCode ?? item.source ?? input.sourceCode,
+          sourceCode: input.sourceCode,
           externalId: item.externalId,
           itemCode,
           normalizedDescription: item.normalizedDescription.trim(),
@@ -206,6 +238,73 @@ export class SourceSyncRepository {
           state: item.state?.trim() ?? '',
           observedAt: item.observedAt,
           opportunityId: item.opportunityId ?? null,
+          sourceUrl: item.sourceUrl,
+          rawJson: JSON.stringify(sanitizePayload(item.raw ?? {})),
+          now,
+        });
+        if (result.changes === 1 && !alreadyExists) created += 1;
+        else updated += 1;
+      }
+      return { created, updated };
+    })();
+  }
+
+  persistMarketResultsPage(input: PersistMarketResultsPageInput): { created: number; updated: number } {
+    assertSourceItems(input.sourceCode, input.items);
+    return this.db.transaction(() => {
+      let created = 0;
+      let updated = 0;
+      const statement = this.db.prepare(`
+        INSERT INTO market_results (
+          source_code, external_id, item_code, normalized_description, unit, quantity,
+          unit_price_cents, total_price_cents, organization, state, opportunity_id,
+          winner, awarded_price_cents, status, observed_at, source_url, raw_json, created_at, updated_at
+        ) VALUES (
+          @sourceCode, @externalId, @itemCode, @normalizedDescription, @unit, @quantity,
+          @unitPriceCents, @totalPriceCents, @organization, @state, @opportunityId,
+          @winner, @awardedPriceCents, @status, @observedAt, @sourceUrl, @rawJson, @now, @now
+        )
+        ON CONFLICT(source_code, external_id, item_code) DO UPDATE SET
+          normalized_description = excluded.normalized_description,
+          unit = excluded.unit,
+          quantity = excluded.quantity,
+          unit_price_cents = excluded.unit_price_cents,
+          total_price_cents = excluded.total_price_cents,
+          organization = excluded.organization,
+          state = excluded.state,
+          opportunity_id = excluded.opportunity_id,
+          winner = excluded.winner,
+          awarded_price_cents = excluded.awarded_price_cents,
+          status = excluded.status,
+          observed_at = excluded.observed_at,
+          source_url = excluded.source_url,
+          raw_json = excluded.raw_json,
+          updated_at = excluded.updated_at
+      `);
+      const exists = this.db.prepare(`
+        SELECT 1 FROM market_results
+        WHERE source_code = ? AND external_id = ? AND item_code = ?
+      `);
+      for (const item of input.items) {
+        const now = new Date().toISOString();
+        const itemCode = item.itemCode ?? '';
+        const alreadyExists = exists.get(input.sourceCode, item.externalId, itemCode) !== undefined;
+        const result = statement.run({
+          sourceCode: input.sourceCode,
+          externalId: item.externalId,
+          itemCode,
+          normalizedDescription: item.normalizedDescription.trim(),
+          unit: item.unit.trim(),
+          quantity: item.quantity,
+          unitPriceCents: item.unitPriceCents ?? null,
+          totalPriceCents: item.totalPriceCents ?? null,
+          organization: item.organization?.trim() ?? '',
+          state: item.state?.trim() ?? '',
+          opportunityId: item.opportunityId ?? null,
+          winner: item.winner ?? null,
+          awardedPriceCents: item.awardedPriceCents ?? null,
+          status: item.status ?? null,
+          observedAt: item.observedAt,
           sourceUrl: item.sourceUrl,
           rawJson: JSON.stringify(sanitizePayload(item.raw ?? {})),
           now,
@@ -255,6 +354,57 @@ export class SourceSyncRepository {
       state: row.state,
       observedAt: row.observed_at,
       opportunityId: row.opportunity_id,
+      sourceUrl: row.source_url,
+      raw: JSON.parse(row.raw_json) as unknown,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+  }
+
+  listMarketResults(sourceCode?: SourceId): Array<{
+    id: number;
+    sourceCode: SourceId;
+    externalId: string;
+    itemCode: string;
+    normalizedDescription: string;
+    unit: string;
+    quantity: number;
+    unitPriceCents: number | null;
+    totalPriceCents: number | null;
+    organization: string;
+    state: string;
+    opportunityId: number | null;
+    winner: string | null;
+    awardedPriceCents: number | null;
+    status: string | null;
+    observedAt: string;
+    sourceUrl: string;
+    raw: unknown;
+    createdAt: string;
+    updatedAt: string;
+  }> {
+    const rows = this.db.prepare(`
+      SELECT * FROM market_results
+      WHERE (? IS NULL OR source_code = ?)
+      ORDER BY observed_at DESC, id DESC
+    `).all(sourceCode ?? null, sourceCode ?? null) as MarketResultRow[];
+    return rows.map((row) => ({
+      id: row.id,
+      sourceCode: row.source_code,
+      externalId: row.external_id,
+      itemCode: row.item_code,
+      normalizedDescription: row.normalized_description,
+      unit: row.unit,
+      quantity: row.quantity,
+      unitPriceCents: row.unit_price_cents,
+      totalPriceCents: row.total_price_cents,
+      organization: row.organization,
+      state: row.state,
+      opportunityId: row.opportunity_id,
+      winner: row.winner,
+      awardedPriceCents: row.awarded_price_cents,
+      status: row.status,
+      observedAt: row.observed_at,
       sourceUrl: row.source_url,
       raw: JSON.parse(row.raw_json) as unknown,
       createdAt: row.created_at,
@@ -370,4 +520,16 @@ function sanitizePayload(value: unknown, depth = 0): unknown {
     }
   }
   return output;
+}
+
+function assertSourceItems(
+  sourceCode: SourceId,
+  items: Array<{ sourceCode?: SourceId; source?: SourceId }>,
+): void {
+  for (const item of items) {
+    if ((item.sourceCode !== undefined && item.sourceCode !== sourceCode)
+      || (item.source !== undefined && item.source !== sourceCode)) {
+      throw new Error(`Page sourceCode ${sourceCode} does not match item sourceCode`);
+    }
+  }
 }

@@ -6,6 +6,7 @@ import {
   PncpSourceClient,
   runSourcesIndependently,
 } from '../../src/integrations/sources/OfficialSourceClient';
+import { createSourceRegistry } from '../../src/integrations/sources/sourceRegistry';
 import { sourceLabel } from '../../src/domain/sourceTypes';
 
 const filters: FilterConfig = {
@@ -113,44 +114,132 @@ describe('contrato de fontes oficiais', () => {
 
   it('mapeia fixture oficial BEC/SP por HTTP JSON, com URL, timeout e retries configuráveis', async () => {
     const requestedUrls: URL[] = [];
+    const summary = {
+      OC: '100111000012026OC00015',
+      UNIDADE_COMPRADORA: 'Órgão BEC',
+      PROCEDIMENTO: 'Pregão Eletrônico',
+      SITUACAO: 'Encerrada(o) com Vencedor',
+    };
+    const detail = {
+      OC: '100111000012026OC00015',
+      MUNICIPIO: 'São Paulo',
+      UF: 'SP',
+      DT_INICIO: '01/08/2026',
+      DT_FIM: '31/08/2026',
+      LINK_EDITAL: 'https://www.bec.sp.gov.br/edital/oc-15',
+      ITENS: [{
+        NR_SEQUENCIA_ITEM: '1',
+        CD_ITEM: '12345',
+        DESCRICAO_ITEM: 'Serviço de suporte',
+        UNIDADE_FORNECIMENTO: 'UNIDADE',
+        QUANTIDADE: '2',
+        MenorValor: '10,50',
+        VL_TOTAL_NEGOCIADO: '21,00',
+      }],
+    };
     const client = new BecSpClient({
       baseUrl: 'https://bec.example.test',
       operation: 'pregao_encerrado',
       timeoutMs: 1_000,
       maxRetries: 0,
       fetchFn: async (input) => {
-        requestedUrls.push(new URL(String(input)));
-        return new Response(JSON.stringify([{
-          OC: '100111000012026OC00015',
-          MUNICIPIO: 'São Paulo',
-          UF: 'SP',
-          UNIDADE_COMPRADORA: 'Órgão BEC',
-          PROCEDIMENTO: 'Pregão Eletrônico',
-          SITUACAO: 'Encerrada(o) com Vencedor',
-          DT_INICIO: '01/08/2026',
-          DT_FIM: '31/08/2026',
-          LINK_EDITAL: 'https://www.bec.sp.gov.br/edital/oc-15',
-          ITENS: [{
-            NR_SEQUENCIA_ITEM: '1',
-            CD_ITEM: '12345',
-            DESCRICAO_ITEM: 'Serviço de suporte',
-            UNIDADE_FORNECIMENTO: 'UNIDADE',
-            QUANTIDADE: '2',
-          }],
-        }]), { status: 200, headers: { 'content-type': 'application/json' } });
+        const url = new URL(String(input));
+        requestedUrls.push(url);
+        const body = url.pathname.endsWith('/100111000012026OC00015') ? [detail] : [summary];
+        return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
       },
     });
 
     const page = await client.listOpportunities(query);
 
-    expect(requestedUrls[0]?.pathname).toBe('/BEC_API/API/pregao_encerrado/OC_encerrada/28082026/31082026');
+    expect(requestedUrls.map((url) => url.pathname)).toEqual([
+      '/BEC_API/API/pregao_encerrado/OC_encerrada/28082026/31082026',
+      '/BEC_API/API/pregao_encerrado/OC_encerrada/100111000012026OC00015',
+    ]);
     expect(page.items[0]).toMatchObject({
       pncpId: 'BEC/SP:100111000012026OC00015:12345',
       sourceCode: 'BEC/SP',
       sourceUrl: 'https://www.bec.sp.gov.br/edital/oc-15',
       state: 'SP',
       city: 'São Paulo',
+      publicationDate: '2026-08-01T00:00:00.000Z',
+      biddingDeadline: '2026-08-31T00:00:00.000Z',
       title: 'Serviço de suporte',
     });
+
+    requestedUrls.length = 0;
+    const market = await client.listMarketObservations(query);
+    expect(requestedUrls).toHaveLength(2);
+    expect(market.items[0]).toMatchObject({
+      externalId: '100111000012026OC00015',
+      itemCode: '12345',
+      normalizedDescription: 'servico de suporte',
+      unit: 'UNIDADE',
+      quantity: 2,
+      unitPriceCents: 1_050,
+      totalPriceCents: 2_100,
+      organization: 'Órgão BEC',
+      state: 'SP',
+    });
+  });
+
+  it('reaplica retry para falha HTTP transitória e respeita timeout', async () => {
+    let attempts = 0;
+    const retrying = new BecSpClient({
+      baseUrl: 'https://bec.example.test',
+      operation: 'pregaoM',
+      timeoutMs: 1_000,
+      maxRetries: 1,
+      fetchFn: async () => {
+        attempts += 1;
+        if (attempts === 1) return new Response('{}', { status: 503 });
+        return new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } });
+      },
+    });
+
+    await retrying.listOpportunities(query);
+    expect(attempts).toBe(2);
+
+    let aborted = false;
+    const timingOut = new BecSpClient({
+      operation: 'pregaoM',
+      timeoutMs: 5,
+      maxRetries: 0,
+      fetchFn: async (_input, init) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          aborted = true;
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        }, { once: true });
+      }),
+    });
+
+    await expect(timingOut.listOpportunities(query)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(aborted).toBe(true);
+  });
+
+  it('cria registry configurável e habilita BEC/SP somente quando solicitado', async () => {
+    let requestedUrl = '';
+    const clients = createSourceRegistry({
+      pncpClient: { baseUrl: 'https://pncp.example.test', timeoutMs: 7, maxRetries: 0 },
+      openDataClient: { baseUrl: 'https://open.example.test', timeoutMs: 8, maxRetries: 0 },
+      becSpEnabled: true,
+      becSp: {
+        baseUrl: 'https://bec.example.test',
+        operation: 'pregaoM',
+        timeoutMs: 9,
+        maxRetries: 0,
+        fetchFn: async (input) => {
+          requestedUrl = String(input);
+          return new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } });
+        },
+      },
+    });
+
+    expect(clients.map((client) => client.id)).toEqual(['PNCP', 'OPEN_DATA', 'BEC/SP']);
+    await clients[2]!.listOpportunities(query);
+    expect(requestedUrl).toContain('https://bec.example.test/BEC_API/API/pregaoM/NegociacaoItemOC/');
+    expect(createSourceRegistry().map((client) => client.id)).toEqual(['PNCP', 'OPEN_DATA']);
   });
 });

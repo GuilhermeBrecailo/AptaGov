@@ -12,9 +12,6 @@ function date(value: string | null) {
   return value ? new Intl.DateTimeFormat('pt-BR').format(new Date(value)) : 'Sem prazo informado';
 }
 
-function sourceLabel(source: CatalogOpportunity['source']) {
-  return source === 'OPEN_DATA' ? 'Dados Abertos' : 'PNCP';
-}
 </script>
 
 <template>
@@ -26,7 +23,7 @@ function sourceLabel(source: CatalogOpportunity['source']) {
     </div>
     <article v-for="item in items" :key="item.id" class="opportunity-row" @click="emit('select', item)">
       <div class="row-main">
-        <div class="row-badges"><span class="score-badge">{{ item.score }}/100</span><span class="source-badge">{{ sourceLabel(item.source) }}</span></div>
+        <div class="row-badges"><span class="score-badge">{{ item.score }}/100</span><span class="source-badge">{{ item.sourceLabel }}</span></div>
         <h3>{{ item.title }}</h3>
         <p>{{ item.organization }} <span>·</span> {{ item.state }}{{ item.city ? ` · ${item.city}` : '' }}</p>
       </div>

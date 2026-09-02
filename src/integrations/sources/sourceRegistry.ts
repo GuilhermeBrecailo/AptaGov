@@ -4,7 +4,7 @@ import { BecSpClient, type BecSpClientOptions } from './BecSpClient';
 import {
   OpenDataSourceClient,
   PncpSourceClient,
-  type OfficialSourceClient,
+  type PagedOfficialSourceClient,
 } from './OfficialSourceClient';
 
 export interface SourceRegistryOptions {
@@ -15,7 +15,7 @@ export interface SourceRegistryOptions {
   becSpEnabled?: boolean;
 }
 
-export function createSourceRegistry(options: SourceRegistryOptions = {}): OfficialSourceClient[] {
+export function createSourceRegistry(options: SourceRegistryOptions = {}): PagedOfficialSourceClient[] {
   const pncpClient = new PncpClient(options.pncpClient ?? {
     baseUrl: 'https://pncp.gov.br/api/consulta/v1',
     timeoutMs: 15_000,
@@ -26,7 +26,7 @@ export function createSourceRegistry(options: SourceRegistryOptions = {}): Offic
     timeoutMs: 15_000,
     maxRetries: 3,
   });
-  const clients: OfficialSourceClient[] = [
+  const clients: PagedOfficialSourceClient[] = [
     new PncpSourceClient({ sourceClient: pncpClient }),
     new OpenDataSourceClient({ sourceClient: openDataClient }),
   ];

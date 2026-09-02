@@ -5,16 +5,23 @@ import {
   type SourceId,
   type SourcePage,
   type SourceQuery,
+  type SourceWindow,
 } from '../../domain/sourceTypes';
-import { paginateAll } from '../pncp/paginator';
+import { paginatePages } from '../pncp/paginator';
 import type { PncpClient, PublishedQuery } from '../pncp/PncpClient';
 import type { OpenDataClient } from '../pncp/OpenDataClient';
 import { mapPncpRecord } from '../../services/syncService';
+import type { SourceSyncRepository } from '../../repositories/sourceSyncRepository';
 
 export interface OfficialSourceClient {
   readonly id: SourceId;
   listOpportunities(query: SourceQuery): Promise<SourcePage<OpportunityInput>>;
   listMarketObservations(query: MarketQuery): Promise<SourcePage<MarketObservationInput>>;
+}
+
+export interface PagedOfficialSourceClient extends OfficialSourceClient {
+  listOpportunityPages(query: SourceQuery): AsyncIterable<SourcePage<OpportunityInput>>;
+  listMarketObservationPages(query: MarketQuery): AsyncIterable<SourcePage<MarketObservationInput>>;
 }
 
 type PaginatedSourceClient = Pick<PncpClient | OpenDataClient, 'fetchPublishedPage'>;
@@ -23,33 +30,43 @@ export interface PncpSourceClientOptions {
   sourceClient: PaginatedSourceClient;
 }
 
-export class PncpSourceClient implements OfficialSourceClient {
+export class PncpSourceClient implements PagedOfficialSourceClient {
   readonly id = 'PNCP' as const;
 
   constructor(private readonly options: PncpSourceClientOptions) {}
 
   async listOpportunities(query: SourceQuery): Promise<SourcePage<OpportunityInput>> {
-    const records = await this.fetchRecords(query);
-    return {
-      items: records.map((record) => ({ ...mapPncpRecord(record, 'PNCP'), sourceCode: 'PNCP' })),
-      nextCursor: null,
-      hasNext: false,
-      fetchedAt: new Date().toISOString(),
-    };
+    return collectPages(this.listOpportunityPages(query));
+  }
+
+  async *listOpportunityPages(query: SourceQuery): AsyncGenerator<SourcePage<OpportunityInput>> {
+    for await (const batch of this.fetchPages(query)) {
+      yield {
+        items: batch.response.data.map((record) => ({ ...mapPncpRecord(record, 'PNCP'), sourceCode: 'PNCP' })),
+        nextCursor: batch.nextPage === null ? null : `page:${batch.nextPage}`,
+        hasNext: batch.hasNext,
+        fetchedAt: new Date().toISOString(),
+      };
+    }
   }
 
   async listMarketObservations(query: MarketQuery): Promise<SourcePage<MarketObservationInput>> {
-    const records = await this.fetchRecords(query);
-    return {
-      items: records.flatMap((record) => marketObservationFromRecord(record, 'PNCP', query)),
-      nextCursor: null,
-      hasNext: false,
-      fetchedAt: new Date().toISOString(),
-    };
+    return collectPages(this.listMarketObservationPages(query));
   }
 
-  private fetchRecords(query: SourceQuery): Promise<Record<string, unknown>[]> {
-    return paginateAll(
+  async *listMarketObservationPages(query: MarketQuery): AsyncGenerator<SourcePage<MarketObservationInput>> {
+    for await (const batch of this.fetchPages(query)) {
+      yield {
+        items: batch.response.data.flatMap((record) => marketObservationFromRecord(record, 'PNCP', query)),
+        nextCursor: batch.nextPage === null ? null : `page:${batch.nextPage}`,
+        hasNext: batch.hasNext,
+        fetchedAt: new Date().toISOString(),
+      };
+    }
+  }
+
+  private fetchPages(query: SourceQuery) {
+    return paginatePages(
       (page) => this.options.sourceClient.fetchPublishedPage(toPublishedQuery(query), page),
       cursorToPage(query.cursor),
     );
@@ -60,33 +77,43 @@ export interface OpenDataSourceClientOptions {
   sourceClient: PaginatedSourceClient;
 }
 
-export class OpenDataSourceClient implements OfficialSourceClient {
+export class OpenDataSourceClient implements PagedOfficialSourceClient {
   readonly id = 'OPEN_DATA' as const;
 
   constructor(private readonly options: OpenDataSourceClientOptions) {}
 
   async listOpportunities(query: SourceQuery): Promise<SourcePage<OpportunityInput>> {
-    const records = await this.fetchRecords(query);
-    return {
-      items: records.map((record) => ({ ...mapPncpRecord(record, 'OPEN_DATA'), sourceCode: 'OPEN_DATA' })),
-      nextCursor: null,
-      hasNext: false,
-      fetchedAt: new Date().toISOString(),
-    };
+    return collectPages(this.listOpportunityPages(query));
+  }
+
+  async *listOpportunityPages(query: SourceQuery): AsyncGenerator<SourcePage<OpportunityInput>> {
+    for await (const batch of this.fetchPages(query)) {
+      yield {
+        items: batch.response.data.map((record) => ({ ...mapPncpRecord(record, 'OPEN_DATA'), sourceCode: 'OPEN_DATA' })),
+        nextCursor: batch.nextPage === null ? null : `page:${batch.nextPage}`,
+        hasNext: batch.hasNext,
+        fetchedAt: new Date().toISOString(),
+      };
+    }
   }
 
   async listMarketObservations(query: MarketQuery): Promise<SourcePage<MarketObservationInput>> {
-    const records = await this.fetchRecords(query);
-    return {
-      items: records.flatMap((record) => marketObservationFromRecord(record, 'OPEN_DATA', query)),
-      nextCursor: null,
-      hasNext: false,
-      fetchedAt: new Date().toISOString(),
-    };
+    return collectPages(this.listMarketObservationPages(query));
   }
 
-  private fetchRecords(query: SourceQuery): Promise<Record<string, unknown>[]> {
-    return paginateAll(
+  async *listMarketObservationPages(query: MarketQuery): AsyncGenerator<SourcePage<MarketObservationInput>> {
+    for await (const batch of this.fetchPages(query)) {
+      yield {
+        items: batch.response.data.flatMap((record) => marketObservationFromRecord(record, 'OPEN_DATA', query)),
+        nextCursor: batch.nextPage === null ? null : `page:${batch.nextPage}`,
+        hasNext: batch.hasNext,
+        fetchedAt: new Date().toISOString(),
+      };
+    }
+  }
+
+  private fetchPages(query: SourceQuery) {
+    return paginatePages(
       (page) => this.options.sourceClient.fetchPublishedPage(toPublishedQuery(query), page),
       cursorToPage(query.cursor),
     );
@@ -113,6 +140,64 @@ export async function runSourcesIndependently<
       return { source: client.id, error };
     }
   }));
+}
+
+export interface SourceSyncResult {
+  received: number;
+  persisted: number;
+  created: number;
+  updated: number;
+}
+
+export async function syncSourceOpportunities(
+  client: PagedOfficialSourceClient,
+  query: SourceQuery,
+  repository: SourceSyncRepository,
+): Promise<SourceSyncResult> {
+  const window: SourceWindow = { dateFrom: query.dateFrom, dateTo: query.dateTo };
+  let cursor = repository.getResumeCursor(client.id, window);
+  const result: SourceSyncResult = { received: 0, persisted: 0, created: 0, updated: 0 };
+
+  try {
+    for await (const page of client.listOpportunityPages({ ...query, cursor })) {
+      const persisted = repository.persistOpportunityPage({
+        sourceCode: client.id,
+        window,
+        cursor,
+        nextCursor: page.nextCursor,
+        items: page.items,
+      });
+      result.received += page.items.length;
+      result.persisted += page.items.length;
+      result.created += persisted.created;
+      result.updated += persisted.updated;
+      cursor = page.nextCursor;
+    }
+    return result;
+  } catch (error) {
+    repository.recordFailure(client.id, window, sourceErrorCategory(error));
+    throw error;
+  }
+}
+
+async function collectPages<T>(pages: AsyncIterable<SourcePage<T>>): Promise<SourcePage<T>> {
+  const items: T[] = [];
+  let fetchedAt = new Date().toISOString();
+  for await (const page of pages) {
+    items.push(...page.items);
+    fetchedAt = page.fetchedAt;
+  }
+  return { items, nextCursor: null, hasNext: false, fetchedAt };
+}
+
+function sourceErrorCategory(error: unknown): string {
+  if (error instanceof Error && error.name === 'AbortError') return 'TIMEOUT';
+  if (typeof error === 'object' && error !== null && 'status' in error) {
+    const status = Number((error as { status: unknown }).status);
+    if (status === 429) return 'RATE_LIMITED';
+    if (status >= 500) return 'UNAVAILABLE';
+  }
+  return 'SYNC_FAILED';
 }
 
 function toPublishedQuery(query: SourceQuery): PublishedQuery {

@@ -60,8 +60,34 @@ export class BecSpClient {
     };
   }
 
+  async *listOpportunityPages(query: SourceQuery): AsyncGenerator<SourcePage<OpportunityInput>> {
+    yield this.mapOpportunityPage(await this.loadRecords(query), query);
+  }
+
   async listMarketObservations(query: MarketQuery): Promise<SourcePage<MarketObservationInput>> {
     const records = await this.loadRecords(query);
+    return {
+      items: records.flatMap((record) => marketObservationsFromRecord(record, query)),
+      nextCursor: null,
+      hasNext: false,
+      fetchedAt: new Date().toISOString(),
+    };
+  }
+
+  async *listMarketObservationPages(query: MarketQuery): AsyncGenerator<SourcePage<MarketObservationInput>> {
+    yield this.mapMarketPage(await this.loadRecords(query), query);
+  }
+
+  private mapOpportunityPage(records: Record<string, unknown>[], query: SourceQuery): SourcePage<OpportunityInput> {
+    return {
+      items: records.flatMap((record) => opportunityFromRecord(record, query)),
+      nextCursor: null,
+      hasNext: false,
+      fetchedAt: new Date().toISOString(),
+    };
+  }
+
+  private mapMarketPage(records: Record<string, unknown>[], query: MarketQuery): SourcePage<MarketObservationInput> {
     return {
       items: records.flatMap((record) => marketObservationsFromRecord(record, query)),
       nextCursor: null,
@@ -87,8 +113,16 @@ export class BecSpClient {
   ): Promise<Record<string, unknown>[]> {
     const expanded: Record<string, unknown>[] = [];
     for (const record of records) {
+      const offerId = firstString(record.OC, record.oc, record.NumeroOC, record.numeroOC);
+      if (operation.endsWith('_encerrado') && offerId) {
+        const operationRoot = operationRootPath(operation, query);
+        const detail = await this.requestJson(`${operationRoot}${encodeURIComponent(offerId)}`);
+        expanded.push({ ...record, ...(detail[0] ?? {}) });
+        continue;
+      }
+
       const code = firstString(record.Codigo, record.codigo);
-      if (!code || firstString(record.OC, record.oc)) {
+      if (!code || offerId) {
         expanded.push(record);
         continue;
       }

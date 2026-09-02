@@ -196,7 +196,7 @@ function changeVisualType(type: OpportunityChangeEvent['type']): AgendaVisualTyp
 }
 
 function sourceLabel(opportunity: CatalogOpportunity): string {
-  return opportunity.source === 'PNCP' ? 'Fonte oficial · PNCP' : 'Fonte oficial · Dados abertos';
+  return `Fonte oficial · ${opportunity.sourceLabel}`;
 }
 
 function currentMonthRange() {
