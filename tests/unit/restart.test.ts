@@ -13,4 +13,18 @@ describe('retomada do worker', () => {
 
     expect(repository.find(jobId)?.status).toBe('PENDING');
   });
+
+  it('persiste checkpoint e suporta os tipos duraveis do ciclo', () => {
+    const db = createTestDatabase();
+    const repository = new JobRepository(db);
+    const source = repository.create('source_sync', { source: 'PNCP', cursor: 'page:2' }, 'source:PNCP:window');
+    const agenda = repository.create('agenda_preparation', { organizationId: 1 }, 'agenda:1:cycle');
+    const market = repository.create('market_refresh', { dateFrom: '2026-08-01' }, 'market:2026-08-01');
+
+    repository.updateCheckpoint(source, { source: 'PNCP', cursor: 'page:3' });
+
+    expect(repository.find(source)).toMatchObject({ type: 'source_sync', checkpoint: { cursor: 'page:3' } });
+    expect(repository.find(agenda)?.type).toBe('agenda_preparation');
+    expect(repository.find(market)?.type).toBe('market_refresh');
+  });
 });

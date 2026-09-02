@@ -2,6 +2,7 @@ export interface WorkerSchedulerOptions {
   intervalMs: number;
   run: () => Promise<unknown>;
   onError?: (error: unknown) => void;
+  enabled?: () => boolean;
 }
 
 export class WorkerScheduler {
@@ -35,6 +36,10 @@ export class WorkerScheduler {
 
   private async tick(): Promise<void> {
     if (!this.started || this.running) return;
+    if (this.options.enabled && !this.options.enabled()) {
+      this.schedule(this.options.intervalMs);
+      return;
+    }
     this.running = true;
     try {
       await this.options.run();

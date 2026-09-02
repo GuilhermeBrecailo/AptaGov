@@ -8,6 +8,7 @@ const runtime = new WorkerRuntime(env);
 const scheduler = new WorkerScheduler({
   intervalMs: env.syncIntervalMinutes * 60_000,
   run: () => runtime.runCycle({ mode: 'automatic' }),
+  onError: (error) => logger.error({ error }, 'Automatic worker cycle failed'),
 });
 
 const stop = () => {

@@ -29,6 +29,9 @@ const envSchema = z.object({
     (value) => typeof value === 'string' ? ['true', '1', 'yes', 'on'].includes(value.trim().toLowerCase()) : value,
     z.boolean().default(false),
   ),
+  BEC_SP_BASE_URL: z.string().url().default('https://www.bec.sp.gov.br'),
+  BEC_SP_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
+  BEC_SP_MAX_RETRIES: z.coerce.number().int().min(0).default(3),
   PLATFORM_ADMIN_EMAILS: z.string().default(''),
 });
 
@@ -56,6 +59,9 @@ export interface AppEnv {
   marketMinObservations: number;
   marketLookbackDays: number;
   becSpEnabled: boolean;
+  becSpBaseUrl: string;
+  becSpTimeoutMs: number;
+  becSpMaxRetries: number;
   platformAdminEmails: string[];
 }
 
@@ -85,6 +91,9 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     marketMinObservations: parsed.MARKET_MIN_OBSERVATIONS,
     marketLookbackDays: parsed.MARKET_LOOKBACK_DAYS,
     becSpEnabled: parsed.BEC_SP_ENABLED,
+    becSpBaseUrl: parsed.BEC_SP_BASE_URL,
+    becSpTimeoutMs: parsed.BEC_SP_TIMEOUT_MS,
+    becSpMaxRetries: parsed.BEC_SP_MAX_RETRIES,
     platformAdminEmails: parsed.PLATFORM_ADMIN_EMAILS.split(',').map((email) => email.trim().toLowerCase()).filter(Boolean),
   };
 }

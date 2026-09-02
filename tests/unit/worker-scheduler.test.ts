@@ -46,4 +46,19 @@ describe('agendamento automático do worker', () => {
     expect(run).toHaveBeenCalledTimes(3);
     scheduler.stop();
   });
+  it('mantem o relogio ativo, mas ignora ciclos quando o toggle esta desligado', async () => {
+    vi.useFakeTimers();
+    let enabled = false;
+    const run = vi.fn().mockResolvedValue(undefined);
+    const scheduler = new WorkerScheduler({ intervalMs: 10_000, run, enabled: () => enabled });
+
+    scheduler.start();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(run).toHaveBeenCalledTimes(0);
+
+    enabled = true;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(run).toHaveBeenCalledTimes(1);
+    scheduler.stop();
+  });
 });

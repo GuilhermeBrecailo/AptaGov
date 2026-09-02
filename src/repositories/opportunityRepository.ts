@@ -187,6 +187,16 @@ export class OpportunityRepository {
     return rows.map((row) => row.organization_id);
   }
 
+  listKanbanOpportunityIds(organizationId: number): number[] {
+    const rows = this.db.prepare(`
+      SELECT opportunity_id
+      FROM organization_opportunities
+      WHERE organization_id = ?
+      ORDER BY opportunity_id ASC
+    `).all(organizationId) as Array<{ opportunity_id: number }>;
+    return rows.map((row) => row.opportunity_id);
+  }
+
   findOrganizationState(organizationId: number, opportunityId: number): KanbanState | undefined {
     const row = this.db.prepare('SELECT kanban_state FROM organization_opportunities WHERE organization_id = ? AND opportunity_id = ?')
       .get(organizationId, opportunityId) as { kanban_state: KanbanState } | undefined;

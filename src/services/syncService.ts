@@ -76,20 +76,14 @@ export async function syncFromPncp(
   for (const state of states) {
     for (const cityIbge of cities) {
       for (const modality of modalities) {
-        const sourceResults = await Promise.all(clients.map(async (candidate) => {
-          try {
-            return {
-              source: candidate.source ?? 'PNCP',
-              records: await paginateAll((page) => candidate.fetchPublishedPage({ dateFrom: start, dateTo: end, state, cityIbge, modality }, page)),
-            };
-          } catch (error) {
-            return { error };
-          }
-        }));
-        const successfulSources = sourceResults.filter(isSuccessfulSourceResult);
+        const sourceResults = await Promise.allSettled(clients.map(async (candidate) => ({
+          source: candidate.source ?? 'PNCP',
+          records: await paginateAll((page) => candidate.fetchPublishedPage({ dateFrom: start, dateTo: end, state, cityIbge, modality }, page)),
+        })));
+        const successfulSources = sourceResults.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
         if (successfulSources.length === 0) {
-          const failedSource = sourceResults.find((result) => 'error' in result);
-          const error = failedSource && 'error' in failedSource ? failedSource.error : undefined;
+          const failedSource = sourceResults.find((result) => result.status === 'rejected');
+          const error = failedSource?.status === 'rejected' ? failedSource.reason : undefined;
           throw error instanceof Error ? error : new Error('No synchronization source available');
         }
         for (const result of successfulSources) {
@@ -99,12 +93,6 @@ export async function syncFromPncp(
     }
   }
   return syncRecords(deduplicateByPncpId(records), repository, hooks);
-}
-
-function isSuccessfulSourceResult(
-  result: { source: OpportunitySource; records: Record<string, unknown>[] } | { error: unknown },
-): result is { source: OpportunitySource; records: Record<string, unknown>[] } {
-  return 'records' in result;
 }
 
 function deduplicateByPncpId(records: OpportunityInput[]): OpportunityInput[] {

@@ -1,4 +1,4 @@
-import type { OpportunityInput, FilterConfig } from '../../domain/types';
+import type { Opportunity, OpportunityInput, FilterConfig } from '../../domain/types';
 import {
   type MarketObservationInput,
   type MarketResultInput,
@@ -190,16 +190,22 @@ export interface SourceSyncResult {
   persisted: number;
   created: number;
   updated: number;
+  entries: Array<{ previous?: Opportunity; current: Opportunity }>;
+}
+
+export interface SourceSyncHooks {
+  onEntry?: (entry: { previous?: Opportunity; current: Opportunity }) => void | Promise<void>;
 }
 
 export async function syncSourceOpportunities(
   client: PagedOfficialSourceClient,
   query: SourceQuery,
   repository: SourceSyncRepository,
+  hooks: SourceSyncHooks = {},
 ): Promise<SourceSyncResult> {
   const window: SourceWindow = { dateFrom: query.dateFrom, dateTo: query.dateTo };
   let cursor = repository.getResumeCursor(client.id, window);
-  const result: SourceSyncResult = { received: 0, persisted: 0, created: 0, updated: 0 };
+  const result: SourceSyncResult = { received: 0, persisted: 0, created: 0, updated: 0, entries: [] };
 
   try {
     for await (const page of client.listOpportunityPages({ ...query, cursor })) {
@@ -214,6 +220,10 @@ export async function syncSourceOpportunities(
       result.persisted += page.items.length;
       result.created += persisted.created;
       result.updated += persisted.updated;
+      for (const entry of persisted.entries ?? []) {
+        result.entries.push(entry);
+        await hooks.onEntry?.(entry);
+      }
       cursor = page.nextCursor;
     }
     return result;
@@ -240,6 +250,7 @@ export async function syncSourceMarket(
     persisted: 0,
     created: 0,
     updated: 0,
+    entries: [],
     observationsReceived: 0,
     resultsReceived: 0,
   };

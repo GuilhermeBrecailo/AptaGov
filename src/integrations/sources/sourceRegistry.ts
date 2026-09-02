@@ -16,7 +16,11 @@ export interface SourceRegistryOptions {
   becSpEnabled?: boolean;
 }
 
-export type SourceRegistryEnvironment = Pick<AppEnv, 'becSpEnabled'>;
+export type SourceRegistryEnvironment = Pick<
+  AppEnv,
+  'pncpBaseUrl' | 'openDataBaseUrl' | 'pncpTimeoutMs' | 'pncpMaxRetries'
+  | 'becSpEnabled' | 'becSpBaseUrl' | 'becSpTimeoutMs' | 'becSpMaxRetries'
+>;
 
 export function createSourceRegistry(options: SourceRegistryOptions = {}): PagedOfficialSourceClient[] {
   const pncpClient = new PncpClient(options.pncpClient ?? {
@@ -44,7 +48,12 @@ export function createSourceRegistry(options: SourceRegistryOptions = {}): Paged
 }
 
 export function createDefaultSourceRegistry(env: SourceRegistryEnvironment = loadEnv()): PagedOfficialSourceClient[] {
-  return createSourceRegistry({ becSpEnabled: env.becSpEnabled });
+  return createSourceRegistry({
+    pncpClient: { baseUrl: env.pncpBaseUrl, timeoutMs: env.pncpTimeoutMs, maxRetries: env.pncpMaxRetries },
+    openDataClient: { baseUrl: env.openDataBaseUrl, timeoutMs: env.pncpTimeoutMs, maxRetries: env.pncpMaxRetries },
+    becSpEnabled: env.becSpEnabled,
+    becSp: { baseUrl: env.becSpBaseUrl, timeoutMs: env.becSpTimeoutMs, maxRetries: env.becSpMaxRetries },
+  });
 }
 
 export const sourceRegistry = createDefaultSourceRegistry();

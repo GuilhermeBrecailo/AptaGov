@@ -5,7 +5,7 @@ import type {
   SourceId,
   SourceWindow,
 } from '../domain/sourceTypes';
-import type { OpportunityInput } from '../domain/types';
+import type { Opportunity, OpportunityInput } from '../domain/types';
 import { OpportunityRepository } from './opportunityRepository';
 
 export type SourceCheckpointStatus = 'RUNNING' | 'COMPLETED' | 'FAILED';
@@ -137,6 +137,7 @@ export interface PersistPageResult {
   created: number;
   updated: number;
   checkpoint: SourceCheckpoint;
+  entries?: Array<{ previous?: Opportunity; current: Opportunity }>;
 }
 
 export class SourceSyncRepository {
@@ -151,12 +152,18 @@ export class SourceSyncRepository {
       this.ensureCheckpoint(input.sourceCode, input.window, input.cursor);
       let created = 0;
       let updated = 0;
+      let persistedCount = 0;
+      const entries: Array<{ previous?: Opportunity; current: Opportunity }> = [];
       for (const item of input.items) {
+        const existing = this.opportunities.findByPncpId(item.pncpId);
+        if (existing && sourcePriority(existing.sourceCode) < sourcePriority(input.sourceCode)) continue;
         const persisted = this.opportunities.upsert({
           ...item,
           source: input.sourceCode,
           sourceCode: input.sourceCode,
         });
+        persistedCount += 1;
+        entries.push({ previous: persisted.previous, current: persisted.current });
         if (persisted.created) created += 1;
         else updated += 1;
       }
@@ -178,7 +185,7 @@ export class SourceSyncRepository {
         input.nextCursor,
         input.nextCursor === null ? 'COMPLETED' : 'RUNNING',
         input.items.length,
-        input.items.length,
+        persistedCount,
         created,
         updated,
         input.nextCursor === null ? 'COMPLETED' : 'RUNNING',
@@ -188,7 +195,7 @@ export class SourceSyncRepository {
         input.window.dateFrom,
         input.window.dateTo,
       );
-      return { created, updated };
+      return { created, updated, entries };
     })();
 
     return {
@@ -585,6 +592,12 @@ function mapCheckpoint(row: CheckpointRow): SourceCheckpoint {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function sourcePriority(source: SourceId): number {
+  if (source === 'PNCP') return 0;
+  if (source === 'OPEN_DATA') return 1;
+  return 2;
 }
 
 function sanitizePayload(value: unknown, depth = 0): unknown {
