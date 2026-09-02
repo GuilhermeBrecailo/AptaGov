@@ -82,4 +82,24 @@ describe('painel administrativo da plataforma', () => {
     expect(metrics.summary.favoritedOpportunities).toBe(1);
     expect(metrics.summary.kanbanOpportunities).toBe(1);
   });
+
+  it('mantém a saúde operacional agregada e sem dados de tenants', async () => {
+    const loaded = await import('../../src/services/' + 'platformAdminService');
+    expect(loaded).toHaveProperty('buildSourceHealthMetrics');
+    const buildSourceHealthMetrics = (loaded as unknown as {
+      buildSourceHealthMetrics?: (db: ReturnType<typeof createTestDatabase>, env: ReturnType<typeof import('../../src/config/env').loadEnv>) => Record<string, unknown>;
+    }).buildSourceHealthMetrics;
+    if (!buildSourceHealthMetrics) return;
+
+    const db = createTestDatabase();
+    const health = buildSourceHealthMetrics(db, (await import('../../src/config/env')).loadEnv({ NODE_ENV: 'test', DATABASE_URL: ':memory:' }));
+
+    expect(health).toHaveProperty('sources');
+    expect(health).toHaveProperty('queueDepth');
+    expect(health).toHaveProperty('notificationFailures');
+    expect(health).toHaveProperty('backupAgeMs');
+    expect(health).toHaveProperty('pauseReason');
+    expect(health).not.toHaveProperty('organizations');
+    expect(JSON.stringify(health)).not.toContain('organizationId');
+  });
 });

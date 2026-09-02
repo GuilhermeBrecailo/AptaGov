@@ -80,7 +80,7 @@ onBeforeUnmount(() => globalThis.removeEventListener('keydown', handleKeydown));
           </NuxtLink>
           <NuxtLink v-if="auth?.isPlatformAdmin" class="nav-drawer-link admin-link" to="/admin" exact-active-class="active" @click="close">
             <span class="nav-drawer-icon">◈</span>
-            <span><strong>Dashboard</strong><small>Visão do negócio</small></span>
+            <span><strong>Dashboard</strong><small>Saúde e visão da operação</small></span>
           </NuxtLink>
         </nav>
 

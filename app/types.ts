@@ -304,6 +304,28 @@ export interface PlatformAdminMetrics {
   }>;
 }
 
+export type SourceHealthStatus = 'HEALTHY' | 'DEGRADED' | 'UNAVAILABLE' | 'DISABLED' | 'UNKNOWN';
+
+export interface SourceHealthMetrics {
+  generatedAt: string;
+  lastSuccessfulRunAt: string | null;
+  sources: Array<{
+    source: SourceId;
+    status: SourceHealthStatus;
+    lastSuccessfulRunAt: string | null;
+    lastErrorCategory: string | null;
+    checkpoint: string | null;
+    checkpointStatus: string | null;
+    checkpointUpdatedAt: string | null;
+  }>;
+  queueDepth: number;
+  notificationFailures: number;
+  backupAgeMs: number | null;
+  lastBackupAt: string | null;
+  pauseReason: string | null;
+  paused: boolean;
+}
+
 export const kanbanColumns: Array<{ state: KanbanState; label: string }> = [
   { state: 'NEW', label: 'Novas' },
   { state: 'QUALIFIED', label: 'Qualificadas' },

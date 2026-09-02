@@ -208,6 +208,11 @@ async function logout() {
         </section>
 
         <section class="content-surface configuration-surface">
+          <div class="list-heading"><div><span class="section-kicker">Inteligência assistida</span><h2>IA de scoring</h2></div><span class="configuration-scope">Desativada</span></div>
+          <p class="configuration-help">O score atual usa somente regras e pesos configurados pela empresa. A IA permanece desligada nesta versão e o custo de IA é R$ 0,00; as variáveis `OPENAI_*` ficam reservadas para uma futura ativação controlada.</p>
+        </section>
+
+        <section class="content-surface configuration-surface">
           <div class="list-heading"><div><span class="section-kicker">Avisos no dispositivo</span><h2>Notificações no celular e computador</h2></div></div>
           <div class="device-notification-card configuration-device-notification">
             <div>

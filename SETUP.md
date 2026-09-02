@@ -113,6 +113,19 @@ Em cada ciclo, o worker consulta o PNCP e a API oficial de Dados Abertos do Comp
 
 Como as duas fontes podem trazer a mesma contratação, os registros são consolidados pelo mesmo `pncp_id` antes de serem gravados. Quando houver duplicidade, o registro do PNCP é preferido e a origem continua disponível no painel. Se uma fonte ficar indisponível, a outra segue sendo processada; se ambas falharem, o ciclo é pausado e o motivo fica registrado.
 
+### Acesso oficial BEC/SP
+
+O conector BEC/SP usa somente o Web Service oficial, sem scraping ou automação de navegador. Para habilitar a fonte, confirme o contrato de acesso com o órgão e preencha no `.env`:
+
+```env
+BEC_SP_ENABLED=false
+BEC_SP_BASE_URL=https://www.bec.sp.gov.br
+BEC_SP_TIMEOUT_MS=15000
+BEC_SP_MAX_RETRIES=3
+```
+
+O padrão local mantém `BEC_SP_ENABLED=false`; assim, o worker continua funcionando com PNCP e Dados Abertos sem exigir credencial BEC/SP. O painel de administração mostra a fonte como desabilitada até que ela seja ativada e validada.
+
 ## 8. Publicar em producao com Docker
 
 Com `.env` e `config/filters.json` preenchidos no servidor, um unico comando sobe a migracao, o painel e o worker:
@@ -138,6 +151,8 @@ O worker pausa automaticamente quando há erro anormal de sincronização, falha
 
 Também é possível pausar manualmente pelo painel. Investigue a causa antes de clicar em `Retomar`; o estado fica persistido no banco e sobrevive ao reinício.
 
+A pausa manual interrompe a execução automática sem apagar oportunidades, checkpoints ou notificações. A pausa automática é aplicada somente ao estágio com risco (fonte, mercado, notificações ou backup); depois de corrigir a causa, use `Retomar` para executar a checagem de saúde e reabrir o estágio.
+
 ## 10. Backup e restauração
 
 O worker cria backup ao final de cada ciclo bem-sucedido. Para criar um backup manual:
@@ -156,6 +171,8 @@ npm run dev
 ```
 
 Nunca restaure arquivos de origem desconhecida. O banco atual deve ser copiado antes da troca para permitir retorno manual.
+
+A cópia do banco atual é o backup de segurança antes da substituição. Depois da troca, confira se as migrações estão aplicadas com `npm run db:migrate` e reinicie o worker com `npm run dev` (ou reinicie o serviço do worker em produção). Valide o login, o catálogo e uma sincronização manual antes de liberar a busca automática. A restauração nunca é executada automaticamente; nenhuma rotina destrutiva substitui o banco sem ação explícita do operador.
 
 ## 11. Primeiro radar e radares salvos
 

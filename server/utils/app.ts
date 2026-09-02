@@ -3,6 +3,7 @@ import { createDatabase, type SqliteDatabase } from '../../src/db/database';
 import { WorkerRuntime } from '../../src/workerRuntime';
 import type { BillingFeature } from '../../src/services/billingService';
 import { getAuthContext } from '../../src/auth/service';
+import { isPlatformAdminEmail } from '../../src/auth/platformAdmin';
 import { SessionRepository } from '../../src/repositories/sessionRepository';
 import { createError, getCookie, type H3Event } from 'h3';
 import { SavedSearchService } from '../../src/services/savedSearchService';
@@ -37,6 +38,15 @@ export function requireAuth(event: H3Event) {
   const token = getCookie(event, SESSION_COOKIE);
   const context = getAuthContext(getAppDatabase(), token);
   if (!context) throw createError({ statusCode: 401, statusMessage: 'Faça login para continuar' });
+  return context;
+}
+
+export function requirePlatformAdmin(event: H3Event) {
+  const context = requireAuth(event);
+  const env = loadEnv();
+  if (!isPlatformAdminEmail(context.user.email, env.platformAdminEmails)) {
+    throw createError({ statusCode: 403, statusMessage: 'Acesso restrito ao administrador da plataforma' });
+  }
   return context;
 }
 

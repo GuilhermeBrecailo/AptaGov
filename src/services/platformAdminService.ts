@@ -1,5 +1,33 @@
 import type { BillingPlanDefinition, BillingPlanCode } from '../config/billingPlans';
+import type { AppEnv } from '../config/env';
 import type { SqliteDatabase } from '../db/database';
+import type { SourceId } from '../domain/sourceTypes';
+import { SystemStateRepository } from '../repositories/systemStateRepository';
+import { getLatestDatabaseBackupStatus } from './backupService';
+
+const SOURCE_IDS: SourceId[] = ['PNCP', 'OPEN_DATA', 'BEC/SP'];
+
+export type SourceHealthStatus = 'HEALTHY' | 'DEGRADED' | 'UNAVAILABLE' | 'DISABLED' | 'UNKNOWN';
+
+export interface SourceHealthMetrics {
+  generatedAt: string;
+  lastSuccessfulRunAt: string | null;
+  sources: Array<{
+    source: SourceId;
+    status: SourceHealthStatus;
+    lastSuccessfulRunAt: string | null;
+    lastErrorCategory: string | null;
+    checkpoint: string | null;
+    checkpointStatus: string | null;
+    checkpointUpdatedAt: string | null;
+  }>;
+  queueDepth: number;
+  notificationFailures: number;
+  backupAgeMs: number | null;
+  lastBackupAt: string | null;
+  pauseReason: string | null;
+  paused: boolean;
+}
 
 export interface PlatformAdminMetrics {
   generatedAt: string;
@@ -156,6 +184,92 @@ export function buildPlatformAdminMetrics(db: SqliteDatabase, plans: BillingPlan
       lastActivityAt: organization.last_activity_at,
     })),
     worker: buildWorkerMetrics(db),
+  };
+}
+
+export function buildSourceHealthMetrics(db: SqliteDatabase, env: AppEnv, now = new Date()): SourceHealthMetrics {
+  const sources = SOURCE_IDS.map((source) => buildSourceHealth(db, source, env));
+  const backup = getLatestDatabaseBackupStatus('./backups', now);
+  const pause = new SystemStateRepository(db).status();
+  const successfulRuns = sources
+    .map((source) => source.lastSuccessfulRunAt)
+    .filter((value): value is string => value !== null)
+    .sort()
+    .reverse();
+
+  return {
+    generatedAt: now.toISOString(),
+    lastSuccessfulRunAt: successfulRuns[0] ?? null,
+    sources,
+    queueDepth: count(db, "SELECT COUNT(*) AS count FROM job_runs WHERE status IN ('PENDING', 'RUNNING', 'FAILED')")
+      + count(db, "SELECT COUNT(*) AS count FROM worker_outbox WHERE status IN ('PENDING', 'PROCESSING', 'FAILED')")
+      + count(db, "SELECT COUNT(*) AS count FROM notification_deliveries WHERE status IN ('PENDING', 'PROCESSING', 'FAILED')")
+      + count(db, "SELECT COUNT(*) AS count FROM push_deliveries WHERE status IN ('PENDING', 'PROCESSING', 'FAILED')"),
+    notificationFailures: count(db, "SELECT COUNT(*) AS count FROM notification_deliveries WHERE status = 'FAILED'")
+      + count(db, "SELECT COUNT(*) AS count FROM push_deliveries WHERE status = 'FAILED'"),
+    backupAgeMs: backup.ageMs,
+    lastBackupAt: backup.lastBackupAt,
+    pauseReason: pause.reason,
+    paused: pause.paused,
+  };
+}
+
+function buildSourceHealth(db: SqliteDatabase, source: SourceId, env: AppEnv): SourceHealthMetrics['sources'][number] {
+  if (source === 'BEC/SP' && !env.becSpEnabled) {
+    return {
+      source,
+      status: 'DISABLED',
+      lastSuccessfulRunAt: null,
+      lastErrorCategory: null,
+      checkpoint: null,
+      checkpointStatus: null,
+      checkpointUpdatedAt: null,
+    };
+  }
+
+  const checkpoint = db.prepare(`
+    SELECT cursor, status, error_category, updated_at, last_success_at
+    FROM source_checkpoints
+    WHERE source_code = ?
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `).get(source) as { cursor: string | null; status: string; error_category: string | null; updated_at: string; last_success_at: string | null } | undefined;
+  const latestRun = db.prepare(`
+    SELECT status, error_category
+    FROM source_runs
+    WHERE source_code = ?
+    ORDER BY COALESCE(finished_at, started_at) DESC, id DESC
+    LIMIT 1
+  `).get(source) as { status: string; error_category: string | null } | undefined;
+  const successful = db.prepare(`
+    SELECT MAX(last_success_at) AS last_success_at
+    FROM source_checkpoints
+    WHERE source_code = ? AND last_success_at IS NOT NULL
+  `).get(source) as { last_success_at: string | null };
+  const lastError = db.prepare(`
+    SELECT error_category
+    FROM source_runs
+    WHERE source_code = ? AND status = 'FAILED' AND error_category IS NOT NULL
+    ORDER BY COALESCE(finished_at, started_at) DESC, id DESC
+    LIMIT 1
+  `).get(source) as { error_category: string } | undefined;
+  const lastSuccessfulRunAt = successful.last_success_at ?? checkpoint?.last_success_at ?? null;
+
+  let status: SourceHealthStatus = 'UNKNOWN';
+  if (latestRun?.status === 'FAILED' || checkpoint?.status === 'FAILED') {
+    status = lastSuccessfulRunAt ? 'DEGRADED' : 'UNAVAILABLE';
+  } else if (latestRun?.status === 'COMPLETED' || checkpoint?.status === 'COMPLETED') {
+    status = 'HEALTHY';
+  }
+
+  return {
+    source,
+    status,
+    lastSuccessfulRunAt,
+    lastErrorCategory: lastError?.error_category ?? checkpoint?.error_category ?? null,
+    checkpoint: checkpoint?.cursor ?? null,
+    checkpointStatus: checkpoint?.status ?? null,
+    checkpointUpdatedAt: checkpoint?.updated_at ?? null,
   };
 }
 

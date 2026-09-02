@@ -51,3 +51,11 @@ O painel fica em `https://aptagov.site` e o worker continua executando em segund
 Edite `config/filters.json` para regras de negócio e `.env` para credenciais e parâmetros operacionais. Os arquivos sensíveis já estão no `.gitignore`.
 
 Para cobrança, e-mail e push, consulte o [SETUP.md](SETUP.md).
+
+## Operação segura
+
+O comando local único é `npm run dev`: ele inicia painel e worker juntos. A busca automática pode ser ligada ou desligada em `Configuração`; a sincronização manual continua disponível. O worker pausa apenas o estágio com falha e exibe o motivo no painel administrativo.
+
+PNCP e Dados Abertos são as fontes locais padrão. BEC/SP fica desabilitado por padrão e só deve ser ativado com acesso ao Web Service oficial, configurando `BEC_SP_ENABLED`, `BEC_SP_BASE_URL`, `BEC_SP_TIMEOUT_MS` e `BEC_SP_MAX_RETRIES` no `.env`. A saúde agregada das fontes é restrita ao administrador da plataforma.
+
+Para restauração, crie primeiro uma cópia de segurança do banco, valide o arquivo, substitua-o manualmente, confira as migrações com `npm run db:migrate` e reinicie painel e worker. Nenhuma restauração destrutiva é executada automaticamente. O procedimento completo e a validação do fluxo real estão em [SETUP.md](SETUP.md).

@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
@@ -24,7 +24,14 @@ const filterSchema = z.object({
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
 export function loadFilters(filePath = resolve(projectRoot, 'config/filters.json')): FilterConfig {
+  ensureFiltersFile(filePath);
   return filterSchema.parse(JSON.parse(readFileSync(filePath, 'utf8')));
+}
+
+function ensureFiltersFile(filePath: string): void {
+  if (existsSync(filePath)) return;
+  mkdirSync(dirname(filePath), { recursive: true });
+  copyFileSync(resolve(projectRoot, 'config/filters.example.json'), filePath);
 }
 
 export function saveFilters(filters: FilterConfig, filePath = resolve(projectRoot, 'config/filters.json')): FilterConfig {

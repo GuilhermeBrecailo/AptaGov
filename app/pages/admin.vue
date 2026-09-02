@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import type { AuthPayload, PlatformAdminMetrics } from '../types';
+import type { AuthPayload, PlatformAdminMetrics, SourceHealthMetrics } from '../types';
 
 const { data: auth, error: authError } = await useFetch<AuthPayload>('/api/auth/me');
 if (authError.value) await navigateTo('/login');
 
 const { data: metrics, error: metricsError, refresh } = await useFetch<PlatformAdminMetrics>('/api/admin/metrics');
+const { data: sourceHealth, error: sourceHealthError, refresh: refreshSourceHealth } = await useFetch<SourceHealthMetrics>('/api/source-health');
 
 async function logout() {
   await $fetch('/api/auth/logout', { method: 'POST' });
@@ -33,6 +34,33 @@ function statusLabel(status: string): string {
   };
   return labels[status] ?? status;
 }
+
+function healthLabel(status: string): string {
+  const labels: Record<string, string> = {
+    HEALTHY: 'Saudável',
+    DEGRADED: 'Degradada',
+    UNAVAILABLE: 'Indisponível',
+    DISABLED: 'Desabilitada',
+    UNKNOWN: 'Sem execução',
+  };
+  return labels[status] ?? status;
+}
+
+function dateTime(value: string | null): string {
+  if (!value) return 'Ainda não executada';
+  return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value));
+}
+
+function backupAge(value: number | null): string {
+  if (value === null) return 'Nenhum backup válido';
+  const hours = Math.floor(value / 3_600_000);
+  if (hours < 24) return `${hours}h atrás`;
+  return `${Math.floor(hours / 24)}d atrás`;
+}
+
+async function refreshAll() {
+  await Promise.all([refresh(), refreshSourceHealth()]);
+}
 </script>
 
 <template>
@@ -48,7 +76,7 @@ function statusLabel(status: string): string {
     <main class="app-content">
       <div class="app-heading">
         <div><span class="section-kicker">Painel do proprietário</span><h1>Visão do negócio</h1><p>Uma leitura rápida de adoção, receita e saúde da base.</p></div>
-        <button class="btn btn-ghost" @click="refresh">Atualizar dados</button>
+        <button class="btn btn-ghost" @click="refreshAll">Atualizar dados</button>
       </div>
 
       <div v-if="metricsError" class="notice warning">Este painel é restrito ao administrador configurado.</div>
@@ -68,6 +96,28 @@ function statusLabel(status: string): string {
           <div><span class="section-kicker">Radares</span><strong>{{ metrics.summary.activeRadars }}</strong><p>buscas ativas no momento</p></div>
           <div><span class="section-kicker">Aderência</span><strong>{{ metrics.summary.favoritedOpportunities }}</strong><p>oportunidades favoritadas</p></div>
           <div><span class="section-kicker">Pipeline</span><strong>{{ metrics.summary.kanbanOpportunities }}</strong><p>oportunidades no Kanban</p></div>
+        </section>
+
+        <section v-if="sourceHealth || sourceHealthError" class="admin-surface admin-health-panel">
+          <div v-if="sourceHealth" class="list-heading">
+            <div><span class="section-kicker">Operação protegida</span><h2>Saúde das fontes</h2></div>
+            <span class="pagination-label">Última execução: {{ dateTime(sourceHealth.lastSuccessfulRunAt) }}</span>
+          </div>
+          <div v-if="sourceHealth" class="source-health-grid">
+            <article v-for="source in sourceHealth.sources" :key="source.source" class="source-health-card">
+              <div class="source-health-heading"><strong>{{ source.source }}</strong><span class="status-pill" :class="`status-${source.status.toLowerCase()}`">{{ healthLabel(source.status) }}</span></div>
+              <small>Último sucesso: {{ dateTime(source.lastSuccessfulRunAt) }}</small>
+              <small>Checkpoint: {{ source.checkpoint ?? 'não iniciado' }}</small>
+              <small v-if="source.lastErrorCategory">Último erro: {{ source.lastErrorCategory }}</small>
+            </article>
+          </div>
+          <div v-if="sourceHealthError" class="notice warning">A saúde das fontes não pôde ser atualizada.</div>
+          <div v-if="sourceHealth" class="admin-health-summary">
+            <div><span>Profundidade da fila</span><strong>{{ sourceHealth.queueDepth }}</strong></div>
+            <div><span>Falhas de notificação</span><strong>{{ sourceHealth.notificationFailures }}</strong></div>
+            <div><span>Idade do backup</span><strong>{{ backupAge(sourceHealth.backupAgeMs) }}</strong><small>{{ dateTime(sourceHealth.lastBackupAt) }}</small></div>
+            <div><span>Motivo de pausa</span><strong>{{ sourceHealth.pauseReason ?? 'Operação ativa' }}</strong></div>
+          </div>
         </section>
 
         <section class="admin-grid">

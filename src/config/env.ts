@@ -17,6 +17,10 @@ const envSchema = z.object({
   VAPID_PUBLIC_KEY: z.string().default(''),
   VAPID_PRIVATE_KEY: z.string().default(''),
   MAX_NOTIFICATIONS_PER_HOUR: z.coerce.number().int().positive().default(100),
+  AI_ENABLED: z.preprocess(parseBoolean, z.boolean().default(false)),
+  OPENAI_API_KEY: z.string().default(''),
+  OPENAI_MODEL_FAST: z.string().default('gpt-4o-mini'),
+  OPENAI_MONTHLY_BUDGET_USD: z.coerce.number().min(0).default(0),
   BILLING_PROVIDER: z.enum(['mercadopago']).default('mercadopago'),
   MERCADOPAGO_ACCESS_TOKEN: z.string().default(''),
   MERCADOPAGO_WEBHOOK_SECRET: z.string().default(''),
@@ -51,6 +55,10 @@ export interface AppEnv {
   vapidPublicKey: string;
   vapidPrivateKey: string;
   maxNotificationsPerHour: number;
+  aiEnabled: boolean;
+  openAiApiKey: string;
+  openAiModelFast: string;
+  openAiMonthlyBudgetUsd: number;
   billingProvider: 'mercadopago';
   mercadoPagoAccessToken: string;
   mercadoPagoWebhookSecret: string;
@@ -84,6 +92,10 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     vapidPublicKey: parsed.VAPID_PUBLIC_KEY,
     vapidPrivateKey: parsed.VAPID_PRIVATE_KEY,
     maxNotificationsPerHour: parsed.MAX_NOTIFICATIONS_PER_HOUR,
+    aiEnabled: parsed.AI_ENABLED,
+    openAiApiKey: parsed.OPENAI_API_KEY,
+    openAiModelFast: parsed.OPENAI_MODEL_FAST,
+    openAiMonthlyBudgetUsd: parsed.OPENAI_MONTHLY_BUDGET_USD,
     billingProvider: parsed.BILLING_PROVIDER,
     mercadoPagoAccessToken: parsed.MERCADOPAGO_ACCESS_TOKEN,
     mercadoPagoWebhookSecret: parsed.MERCADOPAGO_WEBHOOK_SECRET,
@@ -99,4 +111,12 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     becSpMaxRetries: parsed.BEC_SP_MAX_RETRIES,
     platformAdminEmails: parsed.PLATFORM_ADMIN_EMAILS.split(',').map((email) => email.trim().toLowerCase()).filter(Boolean),
   };
+}
+
+function parseBoolean(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  const normalized = value.trim().toLowerCase();
+  if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'off', ''].includes(normalized)) return false;
+  return value;
 }

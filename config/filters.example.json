@@ -1,16 +1,16 @@
 {
-  "lookbackDays": "{{LOOKBACK_DAYS}}",
-  "states": ["{{UF}}"],
-  "citiesIbge": ["{{CITY_IBGE_CODE}}"],
+  "lookbackDays": 30,
+  "states": [],
+  "citiesIbge": [],
   "modalities": ["{{MODALITY_CODE}}"],
   "keywords": ["{{INCLUDE_KEYWORD}}"],
   "excludedKeywords": ["{{EXCLUDE_KEYWORD}}"],
-  "minimumScore": "{{MINIMUM_SCORE}}",
-  "estimatedValueMinCents": "{{MIN_VALUE_CENTS}}",
+  "minimumScore": 0,
+  "estimatedValueMinCents": 0,
   "scoreWeights": {
-    "keyword": "{{KEYWORD_WEIGHT}}",
-    "region": "{{REGION_WEIGHT}}",
-    "value": "{{VALUE_WEIGHT}}",
-    "deadline": "{{DEADLINE_WEIGHT}}"
+    "keyword": 50,
+    "region": 20,
+    "value": 10,
+    "deadline": 20
   }
 }
