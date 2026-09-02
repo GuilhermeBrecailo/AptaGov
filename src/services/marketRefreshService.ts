@@ -57,10 +57,6 @@ export class MarketRefreshService {
     const query = buildQuery(input);
     const clients = this.options.clients.filter((client) => !input.skipSources?.has(client.id));
     const sourceResults = await Promise.all(clients.map((client) => this.runSource(client, query)));
-    if (sourceResults.length > 0 && sourceResults.every((result) => result.status === 'FAILED')) {
-      const firstFailure = sourceResults[0]?.error;
-      throw firstFailure instanceof Error ? firstFailure : new Error('Nenhuma fonte de mercado disponivel');
-    }
     return {
       sourceResults,
       received: sum(sourceResults, 'received'),

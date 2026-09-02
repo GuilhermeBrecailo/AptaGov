@@ -212,7 +212,7 @@ export class WorkerRuntime {
       mode === 'manual' && options.organizationId !== undefined
         ? { organizationId: options.organizationId, ...(options.radarId !== undefined ? { radarId: options.radarId } : {}) }
         : undefined,
-    ).filter(isDurableJob);
+    ).filter(isDurableJob).filter((job) => mode !== 'automatic' || this.isAutomaticJobEligible(job, enabledOrganizationIds));
     if (!canRunAutomatic && pendingDurableJobs.length === 0) {
       metrics.finishedAt = this.now().toISOString();
       const paused = this.systemState.status().paused;
@@ -503,6 +503,17 @@ export class WorkerRuntime {
     });
   }
 
+  private isAutomaticJobEligible(job: JobRecord, enabledOrganizationIds: readonly number[]): boolean {
+    // Jobs for disabled tenants remain PENDING and are deferred until the toggle is enabled again.
+    const organizationId = job.tenantOrganizationId;
+    if (job.type === 'market_refresh' && organizationId === null) return true;
+    // Malformed/orphaned jobs are admitted only so their executor can terminalize them.
+    if (organizationId === null) return true;
+    if (!enabledOrganizationIds.includes(organizationId)) return false;
+    if (job.tenantRadarId === null) return true;
+    return this.savedSearches.find(organizationId, job.tenantRadarId)?.enabled === true;
+  }
+
   private async executeSourceJob(
     job: JobRecord,
     pausedSources: ReadonlySet<SourceId>,
@@ -640,8 +651,15 @@ export class WorkerRuntime {
           skipSources: pausedSources.size > 0 ? pausedSources : undefined,
         }));
       this.jobs.updateCheckpoint(job.id, { sourceResults: result.sourceResults }, owner);
-      this.jobs.markCompleted(job.id, owner);
-      metrics.jobsCompleted += 1;
+      const allSourcesFailed = result.sourceResults.length > 0
+        && result.sourceResults.every((source) => source.status === 'FAILED');
+      if (allSourcesFailed) {
+        this.jobs.markFailed(job.id, 'Nenhuma fonte de mercado disponível', owner);
+        metrics.jobsFailed += 1;
+      } else {
+        this.jobs.markCompleted(job.id, owner);
+        metrics.jobsCompleted += 1;
+      }
       for (const source of result.sourceResults) {
         if (source.status === 'FAILED') this.pauseStage('market', `Atualização de mercado indisponível: ${source.source}`, source.error, source.source);
       }

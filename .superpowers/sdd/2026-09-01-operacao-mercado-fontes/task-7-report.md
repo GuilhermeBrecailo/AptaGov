@@ -1,7 +1,7 @@
 # Task 7 — Orquestração durável de fontes oficiais
 
 Data: 2026-09-02  
-Status: rodada 5 — pendências de compatibilidade e health checks concluídas e verificadas localmente
+Status: rodada 6 — corte parcial de toggle automático e diagnóstico de mercado concluído; compatibilidade de migration pendente
 
 ## Correções entregues
 
@@ -104,3 +104,12 @@ Limitações reais desta rodada:
 1. O worker antigo só representa o namespace `opportunity/default`; por isso, o compat layer não espelha mercado nem outros escopos na tabela legada, evitando cursor compartilhado. A troca/rollback entre workers deve respeitar o rollout coordenado.
 2. Sem callback de tentativa controlada, o health check de notificação depende de um envio `SENT` recente persistido; não há chamada automática a provedor externo durante o health check.
 3. Após restart, backup só pode ser considerado saudável quando houver artefato válido no caminho registrado pelas métricas persistidas; sem esse artefato a pausa permanece ativa.
+
+## Rodada 6 — corte parcial: toggle automático e falha total de mercado
+
+- Jobs duráveis pendentes no modo automático agora são filtrados pelo estado atual da organização e, quando aplicável, do radar. Jobs de tenant desabilitado permanecem `PENDING` e são adiados até a reativação, sem bloquear a criação/execução dos jobs habilitados; payloads órfãos inválidos continuam chegando ao executor para transição terminal.
+- `MarketRefreshService` preserva o resultado detalhado de cada fonte mesmo quando todas falham. O executor grava `sourceResults` no checkpoint do job, marca o `market_refresh` como `FAILED`, e o ciclo/painel administrativo mantém status e categoria por fonte, incluindo `source_runs`.
+
+Verificações do corte: focused Task 7 (13 arquivos, 55 testes), lint e typecheck passaram.
+
+A compatibilidade da migration 030 com o worker anterior/rollback permanece pendente para o próximo corte, conforme solicitado.
