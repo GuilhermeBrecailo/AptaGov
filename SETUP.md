@@ -218,3 +218,7 @@ npm run e2e:operational-real
 ```
 
 O conjunto de testes cobre deduplicação, paginação completa, score, notificações idempotentes, recuperação após reinício, limite de notificações e transições do kanban. O E2E operacional deve ser executado com banco temporário; para comprovar entrega real, use as duas variáveis de autorização descritas acima.
+
+### Resultado registrado
+
+Na validação local de 02/09/2026, lint, typecheck, build e 215 testes em 58 arquivos foram aprovados. As migrações passaram em banco novo e em uma cópia do banco local. O fluxo operacional validou classificação, Kanban, checklist, agenda, Mercado, backup e uma entrega real no Resend com deduplicação do segundo evento. O PNCP e a fonte de Dados Abertos retornaram zero registros novos na janela dos filtros atuais; por isso, o relatório separa claramente registros oficiais recebidos de uma oportunidade já persistida usada para completar o ensaio operacional.

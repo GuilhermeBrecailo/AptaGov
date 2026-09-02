@@ -60,3 +60,7 @@ O comando local único é `npm run dev`: ele inicia painel e worker juntos. A bu
 PNCP e Dados Abertos são as fontes locais padrão. BEC/SP fica desabilitado por padrão e só deve ser ativado com acesso ao Web Service oficial, configurando `BEC_SP_ENABLED`, `BEC_SP_BASE_URL`, `BEC_SP_TIMEOUT_MS` e `BEC_SP_MAX_RETRIES` no `.env`. A saúde agregada das fontes é restrita ao administrador da plataforma.
 
 Para restauração, crie primeiro uma cópia de segurança do banco, valide o arquivo, substitua-o manualmente, confira as migrações com `npm run db:migrate` e reinicie painel e worker. Nenhuma restauração destrutiva é executada automaticamente. O procedimento completo e a validação do fluxo real estão em [SETUP.md](SETUP.md).
+
+## Evidência da última validação local
+
+Em 02/09/2026, foram aprovados lint, typecheck, build e 215 testes em 58 arquivos. As migrações passaram em banco novo e cópia do banco local. O E2E operacional validou 553 classificações, Kanban, 10 itens de checklist, 1 lembrete, backup válido e 1 entrega real no Resend, com a segunda tentativa do mesmo evento bloqueada. Na janela consultada, as fontes oficiais retornaram 0 registros novos; o restante do pipeline foi exercitado usando uma oportunidade já persistida no banco temporário. O runner informa esse caso sem contar resultado inexistente como sucesso de sincronização.
