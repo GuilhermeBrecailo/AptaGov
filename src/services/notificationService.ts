@@ -11,6 +11,7 @@ export interface EmailMessage {
   to: string;
   subject: string;
   body: string;
+  idempotencyKey?: string;
 }
 
 export interface NotificationSender {
@@ -142,7 +143,12 @@ export class NotificationService {
           owner,
           leaseMs,
           () => this.notifications.renew(delivery.id, owner, leaseMs),
-          () => sender.send({ to: delivery.recipient, subject: delivery.subject, body: delivery.body }),
+          () => sender.send({
+            to: delivery.recipient,
+            subject: delivery.subject,
+            body: delivery.body,
+            idempotencyKey: emailDeliveryKey(delivery.organizationId, delivery.opportunityId, delivery.eventKey),
+          }),
         );
         if (!this.notifications.markSent(delivery.id, result.providerId, owner)) {
           throw new Error('Lease da entrega de e-mail perdido antes da confirmação');
@@ -180,6 +186,10 @@ export class NotificationService {
 
 function deliveryOwner(channel: string): string {
   return `${channel}:${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+}
+
+function emailDeliveryKey(organizationId: number, opportunityId: number, eventKey: string): string {
+  return `aptagov:email:${organizationId}:${opportunityId}:${encodeURIComponent(eventKey)}`;
 }
 
 async function withDeliveryLease<T>(

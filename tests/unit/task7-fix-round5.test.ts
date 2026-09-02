@@ -1,11 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FilterConfig, OpportunityInput } from '../../src/domain/types';
 import type { PagedOfficialSourceClient } from '../../src/integrations/sources/OfficialSourceClient';
+import { ResendEmailNotifier } from '../../src/integrations/notifications/ResendEmailNotifier';
 import { createTestDatabase } from '../../src/db/database';
 import { JobRepository } from '../../src/repositories/jobRepository';
+import { NotificationRepository } from '../../src/repositories/notificationRepository';
 import { OrganizationRepository } from '../../src/repositories/organizationRepository';
 import { OrganizationSyncSettingsRepository } from '../../src/repositories/organizationSyncSettingsRepository';
+import { OpportunityRepository } from '../../src/repositories/opportunityRepository';
 import { buildPlatformAdminMetrics } from '../../src/services/platformAdminService';
+import { NotificationService, type NotificationSender } from '../../src/services/notificationService';
 import { WorkerRuntime } from '../../src/workerRuntime';
 import { loadEnv } from '../../src/config/env';
 
@@ -76,7 +80,11 @@ function sourceClient(
   };
 }
 
-describe('Task 7 fix round 4: toggle automático e diagnóstico de mercado', () => {
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe('Task 7 fix round 5: toggle automático e diagnóstico de mercado', () => {
   it('deixa pending o job da organização desabilitada e executa a habilitada no mesmo ciclo', async () => {
     const db = createTestDatabase();
     const organizations = new OrganizationRepository(db);
@@ -137,5 +145,68 @@ describe('Task 7 fix round 4: toggle automático e diagnóstico de mercado', () 
       expect.objectContaining({ source: 'OPEN_DATA', status: 'FAILED', errorCategory: 'UNAVAILABLE' }),
     ]));
     runtime.close();
+  });
+
+  it('cria source e agenda para B mesmo com jobs pendentes de A no mesmo ciclo', async () => {
+    const db = createTestDatabase();
+    const organizations = new OrganizationRepository(db);
+    const organizationA = organizations.create('Empresa A');
+    const organizationB = organizations.create('Empresa B');
+    const jobs = new JobRepository(db);
+    jobs.create('source_sync', { organizationId: organizationA.id, radarId: null, filters, today: '2026-09-02T10:00:00.000Z' }, 'source_sync:automatic:a:cycle', { organizationId: organizationA.id, radarId: null });
+    jobs.create('agenda_preparation', { organizationId: organizationA.id }, 'agenda_preparation:a:cycle', { organizationId: organizationA.id });
+    const runtime = new WorkerRuntime(loadEnv({ NODE_ENV: 'test', DATABASE_URL: ':memory:' }), db, { sourceClients: [sourceClient('PNCP')] });
+
+    await runtime.runCycle({ mode: 'automatic' });
+
+    expect(runtime.jobs.list().filter((job) => job.type === 'source_sync' && job.tenantOrganizationId === organizationB.id)).toHaveLength(1);
+    expect(runtime.jobs.list().filter((job) => job.type === 'agenda_preparation' && job.tenantOrganizationId === organizationB.id)).toHaveLength(1);
+    expect(runtime.jobs.list().find((job) => job.type === 'source_sync' && job.tenantOrganizationId === organizationB.id)?.status).toBe('COMPLETED');
+    expect(runtime.jobs.list().find((job) => job.type === 'agenda_preparation' && job.tenantOrganizationId === organizationB.id)?.status).toBe('COMPLETED');
+    runtime.close();
+  });
+
+  it('reutiliza a mesma chave de idempotência no retry do e-mail', async () => {
+    const db = createTestDatabase();
+    const organization = new OrganizationRepository(db).create('Empresa E-mail Retry');
+    const opportunityId = new OpportunityRepository(db).insert({
+      pncpId: 'task7-round5-email', title: 'Aviso', description: '', organization: 'Prefeitura', state: 'SP',
+      sourceUrl: 'https://pncp.gov.br/task7-round5-email', publicationDate: '2026-09-02T10:00:00.000Z', estimatedValueCents: 0,
+    });
+    const repository = new NotificationRepository(db);
+    repository.saveSettings(organization.id, { enabled: true, email: 'empresa@example.com' });
+    repository.enqueue({ organizationId: organization.id, opportunityId, recipient: 'empresa@example.com', subject: 'Aviso', body: 'Corpo', eventType: 'OPPORTUNITY_CHANGE', eventKey: 'change:42' });
+    const service = new NotificationService(db);
+    const keys: string[] = [];
+    let attempt = 0;
+    const sender: NotificationSender = {
+      send: async (message) => {
+        keys.push(message.idempotencyKey ?? '');
+        attempt += 1;
+        if (attempt === 1) throw new Error('timeout após aceite');
+        return { providerId: 'resend-1' };
+      },
+    };
+
+    await expect(service.deliverPending(sender, undefined, { owner: 'email-round5-a' })).rejects.toThrow('timeout após aceite');
+    expect(await service.deliverPending(sender, undefined, { owner: 'email-round5-b' })).toBe(1);
+
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBe('aptagov:email:1:1:change%3A42');
+    expect(keys[1]).toBe(keys[0]);
+    db.close();
+  });
+
+  it('envia a chave determinística no header do Resend', async () => {
+    const requests: Request[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push(new Request(input, init));
+      return new Response(JSON.stringify({ id: 'resend-1' }), { status: 200 });
+    }));
+    const notifier = new ResendEmailNotifier('resend-secret', 'noreply@example.com');
+    await notifier.send({ to: 'empresa@example.com', subject: 'Aviso', body: 'Corpo', idempotencyKey: 'aptagov:email:1:1:change%3A42' });
+
+    expect(requests[0]?.headers.get('Idempotency-Key')).toBe('aptagov:email:1:1:change%3A42');
+    expect(requests[0]?.headers.get('Authorization')).toBe('Bearer resend-secret');
   });
 });

@@ -236,9 +236,9 @@ export class WorkerRuntime {
     let phase: WorkerStage = 'source';
 
     let sourceJobs = pendingDurableJobs.filter((job) => job.type === 'source_sync');
-    if (sourceJobs.length === 0 && canRunAutomatic && !sourcePause.blockAll) {
-      sourceJobs = [];
+    if (canRunAutomatic && !sourcePause.blockAll) {
       for (const scope of scopes) {
+        if (sourceJobs.some((job) => jobMatchesScope(job, scope.organizationId, scope.radarId))) continue;
         const payload: SourceJobPayload = {
           organizationId: scope.organizationId,
           radarId: scope.radarId,
@@ -254,7 +254,7 @@ export class WorkerRuntime {
         );
         if (reservation.created) metrics.jobsCreated += 1;
         const job = this.jobs.find(reservation.id);
-        if (job) sourceJobs.push(job);
+        if (job && !sourceJobs.some((existing) => existing.id === job.id)) sourceJobs.push(job);
       }
     }
 
@@ -286,19 +286,17 @@ export class WorkerRuntime {
         let agendaJobs = pendingDurableJobs.filter((job) => job.type === 'agenda_preparation');
         const agendaOrganizationIds = new Set(organizations.map((organization) => organization.id));
         for (const scope of scopes) agendaOrganizationIds.add(scope.organizationId);
-        if (agendaJobs.length === 0) {
-          agendaJobs = [];
-          for (const organizationId of agendaOrganizationIds) {
-            const reservation = this.jobs.reserve(
-              'agenda_preparation',
-              { organizationId } satisfies AgendaJobPayload as unknown as Record<string, unknown>,
-              `agenda_preparation:${organizationId}:${cycleKey(cycleStarted, mode, organizationId, null, this.env.syncIntervalMinutes)}`,
-              { organizationId },
-            );
-            if (reservation.created) metrics.jobsCreated += 1;
-            const job = this.jobs.find(reservation.id);
-            if (job) agendaJobs.push(job);
-          }
+        for (const organizationId of agendaOrganizationIds) {
+          if (agendaJobs.some((job) => job.tenantOrganizationId === organizationId)) continue;
+          const reservation = this.jobs.reserve(
+            'agenda_preparation',
+            { organizationId } satisfies AgendaJobPayload as unknown as Record<string, unknown>,
+            `agenda_preparation:${organizationId}:${cycleKey(cycleStarted, mode, organizationId, null, this.env.syncIntervalMinutes)}`,
+            { organizationId },
+          );
+          if (reservation.created) metrics.jobsCreated += 1;
+          const job = this.jobs.find(reservation.id);
+          if (job && !agendaJobs.some((existing) => existing.id === job.id)) agendaJobs.push(job);
         }
         for (const job of agendaJobs) agendaPrepared += this.executeAgendaJob(job, metrics);
       }
@@ -849,6 +847,10 @@ function cycleKey(now: Date, _mode: SyncMode, _organizationId: number | undefine
 
 function sourceScopeKey(organizationId: number, radarId: number | null): string {
   return `organization:${organizationId}:radar:${radarId ?? 'default'}`;
+}
+
+function jobMatchesScope(job: JobRecord, organizationId: number, radarId: number | null): boolean {
+  return job.tenantOrganizationId === organizationId && job.tenantRadarId === radarId;
 }
 
 function marketScopeKey(organizationId: number | undefined, radarId: number | null | undefined): string {
