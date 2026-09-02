@@ -1,5 +1,6 @@
 export type KanbanState = 'NEW' | 'QUALIFIED' | 'CONTACTED' | 'IN_PROGRESS' | 'WON' | 'LOST' | 'DISCARDED';
-export type OpportunitySource = 'PNCP' | 'OPEN_DATA';
+export type SourceId = 'PNCP' | 'OPEN_DATA' | 'BEC/SP';
+export type OpportunitySource = SourceId;
 export type ReminderType = 'BID_DEADLINE' | 'DOCUMENT_REVIEW' | 'FOLLOW_UP' | 'MEETING';
 export type ReminderStatus = 'PENDING' | 'COMPLETED' | 'SKIPPED';
 export type OpportunityChangeType =
@@ -15,6 +16,8 @@ export type AgendaVisualType = 'BID_DEADLINE' | 'MEETING' | 'DISPUTE' | 'RESULT'
 export interface CatalogOpportunity {
   id: number;
   source: OpportunitySource;
+  sourceCode: SourceId;
+  sourceLabel: string;
   title: string;
   description: string;
   organization: string;

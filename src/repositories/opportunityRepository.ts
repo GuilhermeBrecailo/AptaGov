@@ -1,10 +1,12 @@
 import type { SqliteDatabase } from '../db/database';
 import type { FilterConfig, KanbanState, Opportunity, OpportunityInput, ClassificationSource, OpportunitySource } from '../domain/types';
+import { sourceLabel, type SourceId } from '../domain/sourceTypes';
 
 type OpportunityRow = {
   id: number;
   pncp_id: string;
   source: OpportunitySource;
+  source_code: SourceId;
   title: string;
   description: string;
   organization: string;
@@ -62,7 +64,12 @@ export interface CatalogPage {
 }
 
 export class OpportunityRepository {
-  constructor(private readonly db: SqliteDatabase) {}
+  private readonly hasSourceCodeColumn: boolean;
+
+  constructor(private readonly db: SqliteDatabase) {
+    this.hasSourceCodeColumn = (this.db.prepare('PRAGMA table_info(opportunities)').all() as Array<{ name: string }>)
+      .some((column) => column.name === 'source_code');
+  }
 
   count(): number {
     return (this.db.prepare('SELECT COUNT(*) AS count FROM opportunities').get() as { count: number }).count;
@@ -249,21 +256,30 @@ export class OpportunityRepository {
 
   insert(input: OpportunityInput): number {
     const now = new Date().toISOString();
-    const result = this.db.prepare(`
-      INSERT INTO opportunities (
-        pncp_id, source, title, description, organization, state, city, modality, source_url,
-        publication_date, bidding_deadline, estimated_value_cents, raw_json, created_at, updated_at
-      ) VALUES (@pncpId, @source, @title, @description, @organization, @state, @city, @modality, @sourceUrl,
-        @publicationDate, @biddingDeadline, @estimatedValueCents, @rawJson, @now, @now)
-    `).run({
+    const sourceCode = input.sourceCode ?? input.source ?? 'PNCP';
+    const values = {
       ...input,
-      source: input.source ?? 'PNCP',
+      source: legacySourceFor(sourceCode),
+      sourceCode,
       city: input.city ?? '',
       modality: input.modality ?? '',
       biddingDeadline: input.biddingDeadline ?? null,
       rawJson: JSON.stringify(input.raw ?? {}),
       now,
-    });
+    };
+    const result = this.db.prepare(this.hasSourceCodeColumn ? `
+      INSERT INTO opportunities (
+        pncp_id, source, source_code, title, description, organization, state, city, modality, source_url,
+        publication_date, bidding_deadline, estimated_value_cents, raw_json, created_at, updated_at
+      ) VALUES (@pncpId, @source, @sourceCode, @title, @description, @organization, @state, @city, @modality, @sourceUrl,
+        @publicationDate, @biddingDeadline, @estimatedValueCents, @rawJson, @now, @now)
+    ` : `
+      INSERT INTO opportunities (
+        pncp_id, source, title, description, organization, state, city, modality, source_url,
+        publication_date, bidding_deadline, estimated_value_cents, raw_json, created_at, updated_at
+      ) VALUES (@pncpId, @source, @title, @description, @organization, @state, @city, @modality, @sourceUrl,
+        @publicationDate, @biddingDeadline, @estimatedValueCents, @rawJson, @now, @now)
+    `).run(values);
     return Number(result.lastInsertRowid);
   }
 
@@ -276,21 +292,30 @@ export class OpportunityRepository {
         || existing.biddingDeadline !== (input.biddingDeadline ?? null)
         || existing.estimatedValueCents !== input.estimatedValueCents;
       const now = new Date().toISOString();
-      this.db.prepare(`
-        UPDATE opportunities SET title = @title, description = @description, organization = @organization,
-          source = @source, state = @state, city = @city, modality = @modality, source_url = @sourceUrl,
-          publication_date = @publicationDate, bidding_deadline = @biddingDeadline,
-          estimated_value_cents = @estimatedValueCents, raw_json = @rawJson, updated_at = @now
-        WHERE pncp_id = @pncpId
-      `).run({
+      const sourceCode = input.sourceCode ?? input.source ?? 'PNCP';
+      const values = {
         ...input,
-        source: input.source ?? 'PNCP',
+        source: legacySourceFor(sourceCode),
+        sourceCode,
         city: input.city ?? '',
         modality: input.modality ?? '',
         biddingDeadline: input.biddingDeadline ?? null,
         rawJson: JSON.stringify(input.raw ?? {}),
         now,
-      });
+      };
+      this.db.prepare(this.hasSourceCodeColumn ? `
+        UPDATE opportunities SET title = @title, description = @description, organization = @organization,
+          source = @source, source_code = @sourceCode, state = @state, city = @city, modality = @modality, source_url = @sourceUrl,
+          publication_date = @publicationDate, bidding_deadline = @biddingDeadline,
+          estimated_value_cents = @estimatedValueCents, raw_json = @rawJson, updated_at = @now
+        WHERE pncp_id = @pncpId
+      ` : `
+        UPDATE opportunities SET title = @title, description = @description, organization = @organization,
+          source = @source, state = @state, city = @city, modality = @modality, source_url = @sourceUrl,
+          publication_date = @publicationDate, bidding_deadline = @biddingDeadline,
+          estimated_value_cents = @estimatedValueCents, raw_json = @rawJson, updated_at = @now
+        WHERE pncp_id = @pncpId
+      `).run(values);
       if (classificationChanged) {
         this.db.prepare("UPDATE opportunities SET score = 0, score_breakdown_json = '{}', updated_at = ? WHERE id = ?")
           .run(now, existing.id);
@@ -389,10 +414,13 @@ function catalogOrder(sort: CatalogQuery['sort']): string {
 }
 
 function mapRow(row: OpportunityRow): Opportunity {
+  const sourceCode = row.source_code ?? row.source;
   return {
     id: row.id,
     pncpId: row.pncp_id,
-    source: row.source,
+    source: sourceCode,
+    sourceCode,
+    sourceLabel: sourceLabel(sourceCode),
     title: row.title,
     description: row.description,
     organization: row.organization,
@@ -411,6 +439,10 @@ function mapRow(row: OpportunityRow): Opportunity {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function legacySourceFor(sourceCode: OpportunitySource): 'PNCP' | 'OPEN_DATA' {
+  return sourceCode === 'OPEN_DATA' ? 'OPEN_DATA' : 'PNCP';
 }
 
 function mapRowWithOrganizationScore(row: OpportunityRow & Partial<OrganizationScoreRow>): Opportunity {

@@ -8,11 +8,14 @@ export type KanbanState =
   | 'DISCARDED';
 
 export type ClassificationSource = 'rules';
-export type OpportunitySource = 'PNCP' | 'OPEN_DATA';
+import type { SourceId } from './sourceTypes';
+
+export type OpportunitySource = SourceId;
 
 export interface OpportunityInput {
   pncpId: string;
   source?: OpportunitySource;
+  sourceCode?: SourceId;
   title: string;
   description: string;
   organization: string;
@@ -26,9 +29,11 @@ export interface OpportunityInput {
   raw?: unknown;
 }
 
-export interface Opportunity extends Omit<OpportunityInput, 'source'> {
+export interface Opportunity extends Omit<OpportunityInput, 'source' | 'sourceCode'> {
   id: number;
   source: OpportunitySource;
+  sourceCode: SourceId;
+  sourceLabel: string;
   city: string;
   modality: string;
   kanbanState: KanbanState;
