@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router';
 import OpportunityCatalog from '../components/OpportunityCatalog.vue';
 import OpportunityDetails from '../components/OpportunityDetails.vue';
 import OpportunityKanban from '../components/OpportunityKanban.vue';
+import { getKanbanItems } from '../viewModels/operationalViewModels';
 import type { AuthPayload, CatalogOpportunity, CatalogPage, ChecklistItem, ChecklistPatchInput, FilterConfig, KanbanState, SavedSearch, SyncSettings } from '../types';
 
 const {
@@ -75,16 +76,17 @@ const { data: catalog, pending: catalogLoading, refresh: refreshCatalog } = awai
   default: () => ({ data: [], total: 0, page: 1, pageSize: 20, totalPages: 1 }),
 });
 
-const items = computed(() => catalog.value?.data ?? []);
-const averageScore = computed(() => Math.round(items.value.reduce((sum, item) => sum + item.score, 0) / Math.max(1, items.value.length)));
+const authorizedItems = computed(() => catalog.value?.data ?? []);
+const kanbanItems = computed(() => getKanbanItems(authorizedItems.value));
+const averageScore = computed(() => Math.round(authorizedItems.value.reduce((sum, item) => sum + item.score, 0) / Math.max(1, authorizedItems.value.length)));
 
-watch([items, () => route.query.opportunity], ([currentItems, opportunity]) => {
+watch([authorizedItems, () => route.query.opportunity], ([currentItems, opportunity]) => {
   const opportunityId = Number(opportunity);
   if (!Number.isInteger(opportunityId)) return;
   selected.value = currentItems.find((item) => item.id === opportunityId) ?? selected.value;
 }, { immediate: true });
 
-watch([items, activeView], ([currentItems, view]) => {
+watch([kanbanItems, activeView], ([currentItems, view]) => {
   if (view !== 'kanban') return;
   void Promise.all(currentItems.map((item) => loadChecklist(item.id)));
 }, { immediate: true });
@@ -137,6 +139,8 @@ async function loadChecklist(opportunityId: number, force = false) {
   try {
     const checklist = await $fetch<ChecklistItem[]>(`/api/opportunities/${opportunityId}/checklist`);
     checklistByOpportunity.value = { ...checklistByOpportunity.value, [opportunityId]: checklist };
+  } catch (error) {
+    message.value = error instanceof Error ? error.message : 'Não foi possível carregar a preparação.';
   } finally {
     checklistLoadingIds.value = checklistLoadingIds.value.filter((id) => id !== opportunityId);
   }
@@ -225,12 +229,12 @@ async function logout() {
             <label class="quick-filter"><span>Ordenar por</span><select v-model="sortInput" @change="applySearch"><option value="score">Maior aderência</option><option value="deadline">Prazo mais próximo</option><option value="publication">Mais recentes</option></select></label>
             <label class="quick-check"><input v-model="openDeadlineOnly" type="checkbox" @change="applySearch"><span>Somente com prazo aberto</span></label>
           </div>
-          <OpportunityCatalog :items="items" :loading="catalogLoading" @select="selected = $event" @add="addToKanban" @feedback="updateFeedback" />
+          <OpportunityCatalog :items="authorizedItems" :loading="catalogLoading" @select="selected = $event" @add="addToKanban" @feedback="updateFeedback" />
           <div class="pagination"><button class="btn btn-ghost" :disabled="(catalog?.page ?? 1) <= 1" @click="page -= 1">← Anterior</button><span>{{ catalog?.page ?? 1 }} / {{ catalog?.totalPages ?? 1 }}</span><button class="btn btn-ghost" :disabled="(catalog?.page ?? 1) >= (catalog?.totalPages ?? 1)" @click="page += 1">Próxima →</button></div>
         </section>
       </div>
 
-      <section v-else class="kanban-surface"><div class="list-heading"><div><span class="section-kicker">Pipeline da empresa</span><h2>Do interesse à decisão</h2></div><button class="btn btn-ghost" @click="selectView('catalog')">+ Buscar licitações</button></div><OpportunityKanban :items="items" :loading="catalogLoading" :checklists="checklistByOpportunity" :checklist-loading-ids="checklistLoadingIds" :checklist-saving-ids="checklistSavingIds" :current-user="auth?.user ?? null" @select="selected = $event" @change-state="changeState" @checklist-complete="completeChecklistItem($event.opportunityId, $event.itemId)" @checklist-save="saveChecklistItem($event.opportunityId, $event.itemId, $event.patch)" /></section>
+      <section v-else class="kanban-surface"><div class="list-heading"><div><span class="section-kicker">Pipeline da empresa</span><h2>Do interesse à decisão</h2></div><button class="btn btn-ghost" @click="selectView('catalog')">+ Buscar licitações</button></div><OpportunityKanban :items="kanbanItems" :loading="catalogLoading" :checklists="checklistByOpportunity" :checklist-loading-ids="checklistLoadingIds" :checklist-saving-ids="checklistSavingIds" :current-user="auth?.user ?? null" @select="selected = $event" @change-state="changeState" @checklist-complete="completeChecklistItem($event.opportunityId, $event.itemId)" @checklist-save="saveChecklistItem($event.opportunityId, $event.itemId, $event.patch)" /></section>
     </main>
     <OpportunityDetails :item="selected" :checklist-items="selected ? checklistByOpportunity[selected.id] ?? [] : []" :checklist-loading="selected ? checklistLoadingIds.includes(selected.id) : false" :checklist-saving="checklistSavingIds.length > 0" :current-user="auth?.user ?? null" @close="selected = null" @feedback="updateFeedback(selected!, $event)" @checklist-complete="selected && completeChecklistItem(selected.id, $event)" @checklist-save="(itemId, patch) => selected && saveChecklistItem(selected.id, itemId, patch)" />
   </div>

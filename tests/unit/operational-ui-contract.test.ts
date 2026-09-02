@@ -51,6 +51,14 @@ describe('contrato visual operacional', () => {
     expect(kanban).toContain('OpportunityChecklist');
     expect(home).toContain("opportunity: route.query.opportunity");
     expect(home).toContain('opportunityId');
+    expect(home).toContain('const authorizedItems = computed(() => catalog.value?.data ?? []);');
+    expect(home).toContain('const kanbanItems = computed(() => getKanbanItems(authorizedItems.value));');
+    expect(home).toContain('watch([kanbanItems, activeView]');
+    expect(home).toContain('<OpportunityCatalog :items="authorizedItems"');
+    expect(home).toContain('<OpportunityKanban :items="kanbanItems"');
+    expect(home).toContain('catch (error)');
+    expect(details).toContain('v-if="item.inKanban"');
     expect(viewModels).toContain('buildChecklistPresentation');
+    expect(viewModels).toContain('getKanbanItems');
   });
 });

@@ -19,7 +19,7 @@ Implementação concluída em PT-BR para desktop e mobile, conectada às APIs ex
 - Bloco `Preparação` nos detalhes e nos cards do Kanban com progresso, itens urgentes, próximo prazo, responsável e conclusão rápida.
 - Editor de item de preparação para título, responsável, prazo e nota.
 - Carregamento e atualização de checklists centralizados na página principal, mantendo os componentes de apresentação sem acesso direto a regras ou serviços de domínio.
-- Link da agenda para `/?opportunity=<id>`, que abre o Kanban e seleciona a oportunidade por lookup autorizado direto, mesmo quando ela está além da primeira página.
+- Link da agenda para `/?opportunity=<id>`, que abre o detalhe por lookup autorizado direto, mesmo quando a oportunidade está além da primeira página; itens fora do Kanban não viram cards nem carregam preparação.
 - Endpoint de mudanças em lote com isolamento por organização e lookup direto de oportunidades referenciadas por lembretes ou mudanças.
 - Handlers autenticados de GET/PATCH do checklist versionados, com validação de `assigneeUserId` por membership da organização e atualização atomicamente escopada por organização, oportunidade e item.
 
@@ -111,6 +111,7 @@ Resultado: `ESLint: No issues found`.
 - Os eventos e handlers de checklist mantêm o `opportunityId` explícito, evitando atualizar o card errado.
 - O editor de lembrete recebeu foco inicial e a primeira coluna da grade mensal teve a borda corrigida durante a revisão.
 - A rerevisão 3 foi incorporada sem ampliar o escopo: o lookup direto da agenda aceita somente oportunidades autorizadas por Kanban, favorito ou lembrete; o PATCH do checklist não altera item de outra oportunidade; e a distinção entre `FOLLOW_UP` oficial (`createdByUserId` nulo) e manual foi centralizada no view model.
+- A página principal separa `authorizedItems` de `kanbanItems`: favorito e lembrete fora do Kanban continuam selecionáveis no detalhe, mas ficam fora dos cards, das transições e das chamadas de checklist; falhas de carregamento de checklist são tratadas sem rejeição não observada.
 
 ## Concerns conhecidos
 
@@ -139,3 +140,18 @@ Resultado: concluído com código 0; tipos do Nuxt gerados e TypeScript sem erro
 Lint focado nos arquivos alterados: concluído sem erros.
 
 `git diff --check`: concluído sem erros de whitespace.
+
+## Rodada 3 de correção da rerevisão 4 — 2026-09-02
+
+- O conjunto autorizado continua alimentando a seleção e o detalhe; o Kanban recebe somente `getKanbanItems(authorizedItems)`, filtrado por `item.inKanban`.
+- O watcher de preparação usa exclusivamente `kanbanItems`, preservando GET de checklist e transições para oportunidades realmente adicionadas ao Kanban.
+- `OpportunityDetails` mantém o detalhe de favorito/lembrete fora do Kanban abrível, sem bloco de preparação; a captura de erro em `loadChecklist` evita rejeição não tratada.
+- O teste de view model cobre favorito e lembrete fora do Kanban, preserva item Kanban real, e o contrato de UI verifica a separação de conjuntos, ausência de checklist indevido e detalhe abrível.
+
+### Verificações desta rodada
+
+- Testes focados: 9 arquivos, 31 testes aprovados.
+- Suíte completa: 40 arquivos, 117 testes aprovados.
+- `npm run lint`: código 0.
+- `npm run typecheck`: código 0; tipos do Nuxt gerados e TypeScript sem erros.
+- `npm run build`: código 0; cliente, SSR e Nitro concluídos. Apenas warning de depreciação do Node/Vue.

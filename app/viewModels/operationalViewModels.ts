@@ -9,6 +9,10 @@ export interface ChecklistPresentation {
   progressValue: number;
 }
 
+export function getKanbanItems<T extends { inKanban: boolean }>(items: T[]): T[] {
+  return items.filter((item) => item.inKanban);
+}
+
 /**
  * View model de apresentacao: urgencia e proximo item orientam a leitura da tela.
  * A funcao nao decide transicoes, permissao, score ou qualquer estado de dominio.

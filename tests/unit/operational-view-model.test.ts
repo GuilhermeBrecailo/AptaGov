@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildChecklistPresentation, getReminderVisualType, shouldShowAgendaEntry } from '../../app/viewModels/operationalViewModels';
+import { buildChecklistPresentation, getKanbanItems, getReminderVisualType, shouldShowAgendaEntry } from '../../app/viewModels/operationalViewModels';
 import type { AgendaEntryView, ChecklistItem, OrganizationAlertPreferences } from '../../app/types';
 
 function checklistItem(overrides: Partial<ChecklistItem>): ChecklistItem {
@@ -87,5 +87,15 @@ describe('view models da operacao', () => {
       ...allPreferences,
       disputeStart: false,
     })).toBe(true);
+  });
+
+  it('mantem favorito e lembrete fora do kanban sem remover item real do kanban', () => {
+    const items = [
+      { id: 1, inKanban: true, kind: 'kanban' },
+      { id: 2, inKanban: false, kind: 'favorite' },
+      { id: 3, inKanban: false, kind: 'reminder' },
+    ];
+
+    expect(getKanbanItems(items)).toEqual([{ id: 1, inKanban: true, kind: 'kanban' }]);
   });
 });
