@@ -112,6 +112,9 @@ describe('Task 7 fix round 2: efeitos duráveis e escopo', () => {
         notifications: async () => true,
         backup: async () => false,
       },
+      notificationHealthChecks: {
+        email: async () => true,
+      },
     });
 
     expect(await runtime.resumeAfterHealthCheck()).toBe(false);

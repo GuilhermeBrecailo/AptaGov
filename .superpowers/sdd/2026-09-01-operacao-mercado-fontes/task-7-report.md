@@ -1,7 +1,7 @@
 # Task 7 — Orquestração durável de fontes oficiais
 
 Data: 2026-09-02  
-Status: rodada 2 concluída e verificada localmente
+Status: rodada 3 concluída e verificada localmente
 
 ## Correções entregues
 
@@ -28,8 +28,11 @@ As tabelas e colunas existentes foram preservadas; o comportamento manual, autom
 ## Verificações desta rodada
 
 - Focused Task 7: passou — 8 arquivos, 25 testes.
+- Correções da rodada 3: `task7-fix-round3` passou com 7/7 testes e `source-checkpoint` passou com 10/10.
+- Suíte completa: passou — 50 arquivos, 181 testes.
+- `npm run lint`: passou.
 - `npm run typecheck`: passou.
-- Suíte completa, lint e build: não executados nesta rodada final, conforme o escopo de fechamento reduzido solicitado.
+- `npm run build`: passou.
 
 ## Limitações concretas
 
@@ -51,7 +54,7 @@ Este corte trata somente retry durável da outbox e single-flight/lease dos jobs
 - `JobRepository.reserve` mantém single-flight mesmo após `COMPLETED`, recupera jobs `FAILED` para o próximo ciclo, aceita payload legado na filtragem/claim e mantém conclusão/renovação condicionadas ao owner.
 - `WorkerRuntime` renova leases durante sincronizações longas de fonte/mercado e durante a preparação de agenda; o parâmetro não utilizado do processamento da outbox foi removido.
 
-Verificações do corte: focused Task 7 em 9 arquivos/30 testes, lint e typecheck passaram. A suíte completa ainda não foi rodada neste corte; a regressão de `source-checkpoint` e as demais pendências do rereview continuam abertas. Build também permanece pendente.
+Verificações do corte: focused Task 7 em 9 arquivos/30 testes, lint e typecheck passaram. A regressão de `source-checkpoint` e as demais pendências do rereview foram corrigidas na rodada 3; suíte completa e build também passaram.
 
 As pendências listadas acima foram tratadas na rodada 3; permanecem apenas as limitações concretas abaixo.
 
@@ -64,4 +67,4 @@ As pendências listadas acima foram tratadas na rodada 3; permanecem apenas as l
 - O endpoint administrativo existente passa a expor `sourceRuns` e ciclos do worker com contagens, status e categorias de erro, omitindo `error_message`, payloads, cursores e caminhos de backup.
 - Jobs legados com tenant válido são reivindicáveis pelo payload quando necessário; globais são marcados explicitamente e payloads incompatíveis deixam de ser órfãos em `PENDING`. Jobs inválidos também são terminalizados pelo runtime.
 
-Focused desta etapa: `tests/unit/task7-fix-round3.test.ts` passou com 7/7 testes; `tests/unit/source-checkpoint.test.ts` passou com 10/10; lint passou. A suíte completa, typecheck e build serão registrados após a verificação final desta rodada.
+Focused desta etapa: `tests/unit/task7-fix-round3.test.ts` passou com 7/7 testes; `tests/unit/source-checkpoint.test.ts` passou com 10/10; lint passou. A suíte completa passou com 50 arquivos/181 testes; typecheck e build também passaram.
