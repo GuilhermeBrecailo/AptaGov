@@ -72,6 +72,7 @@ function sourceClient(
 
 function failingSourceClient(id: 'PNCP' | 'OPEN_DATA'): PagedOfficialSourceClient {
   return sourceClient(id, async function* () {
+    yield* [];
     throw new Error(`${id} indisponível`);
   });
 }

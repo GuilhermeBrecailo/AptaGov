@@ -218,7 +218,7 @@ export class SourceSyncRepository {
       }
       const now = new Date().toISOString();
       this.db.prepare(`
-        UPDATE source_checkpoints
+        UPDATE source_checkpoints_scoped
         SET cursor = ?,
             status = ?,
             received_count = received_count + ?,
@@ -245,6 +245,7 @@ export class SourceSyncRepository {
         input.window.dateFrom,
         input.window.dateTo,
       );
+      this.mirrorLegacyOpportunityCheckpoint(input.sourceCode, scopeKey, input.window);
       return { created, updated, persisted: persistedCount, entries };
     })();
 
@@ -519,12 +520,24 @@ export class SourceSyncRepository {
   getCheckpoint(sourceCode: SourceId, window: SourceWindow, flow?: SourceFlow, scopeKey = 'default'): SourceCheckpoint | undefined {
     const requestedFlow = flow ?? 'opportunity';
     const row = this.db.prepare(`
-      SELECT * FROM source_checkpoints
+      SELECT * FROM source_checkpoints_scoped
       WHERE source_code = ? AND flow = ? AND scope_key = ? AND window_start = ? AND window_end = ?
     `).get(sourceCode, requestedFlow, scopeKey, window.dateFrom, window.dateTo) as CheckpointRow | undefined;
-    if (row || flow !== undefined) return row ? mapCheckpoint(row) : undefined;
+    if (row) return mapCheckpoint(row);
+    if (requestedFlow === 'opportunity' && scopeKey === 'default') {
+      const legacyRow = this.db.prepare(`
+        SELECT source_code, 'opportunity' AS flow, 'default' AS scope_key,
+          window_start, window_end, cursor, status, received_count, persisted_count,
+          created_count, updated_count, error_category, last_success_at, next_retry_at,
+          created_at, updated_at
+        FROM source_checkpoints
+        WHERE source_code = ? AND window_start = ? AND window_end = ?
+      `).get(sourceCode, window.dateFrom, window.dateTo) as CheckpointRow | undefined;
+      if (legacyRow) return mapCheckpoint(legacyRow);
+    }
+    if (flow !== undefined) return undefined;
     const compatibleMarketRows = this.db.prepare(`
-      SELECT * FROM source_checkpoints
+      SELECT * FROM source_checkpoints_scoped
       WHERE source_code = ? AND flow = 'market' AND window_start = ? AND window_end = ?
       ORDER BY updated_at DESC
       LIMIT 2
@@ -548,15 +561,17 @@ export class SourceSyncRepository {
     scopeKey = 'default',
   ): SourceCheckpoint {
     const now = new Date().toISOString();
+    const existing = this.getCheckpoint(sourceCode, window, flow, scopeKey);
     this.db.prepare(`
-      INSERT INTO source_checkpoints (
+      INSERT INTO source_checkpoints_scoped (
         source_code, flow, scope_key, window_start, window_end, cursor, status, error_category,
         next_retry_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, NULL, 'FAILED', ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, 'FAILED', ?, ?, ?, ?)
       ON CONFLICT(source_code, flow, scope_key, window_start, window_end) DO UPDATE SET
         status = 'FAILED', error_category = excluded.error_category,
         next_retry_at = excluded.next_retry_at, updated_at = excluded.updated_at
-    `).run(sourceCode, flow, scopeKey, window.dateFrom, window.dateTo, errorCategory, nextRetryAt, now, now);
+    `).run(sourceCode, flow, scopeKey, window.dateFrom, window.dateTo, existing?.cursor ?? null, errorCategory, nextRetryAt, now, now);
+    this.mirrorLegacyOpportunityCheckpoint(sourceCode, scopeKey, window);
     return this.getCheckpoint(sourceCode, window, flow, scopeKey) as SourceCheckpoint;
   }
 
@@ -613,14 +628,75 @@ export class SourceSyncRepository {
     return rows.map(mapSourceRun);
   }
 
+  private mirrorLegacyOpportunityCheckpoint(sourceCode: SourceId, scopeKey: string, window: SourceWindow): void {
+    if (scopeKey !== 'default') return;
+    const row = this.db.prepare(`
+      SELECT source_code, window_start, window_end, cursor, status,
+        received_count, persisted_count, created_count, updated_count, error_category,
+        last_success_at, next_retry_at, created_at, updated_at
+      FROM source_checkpoints_scoped
+      WHERE source_code = ? AND flow = 'opportunity' AND scope_key = 'default'
+        AND window_start = ? AND window_end = ?
+    `).get(sourceCode, window.dateFrom, window.dateTo) as {
+      source_code: SourceId;
+      window_start: string;
+      window_end: string;
+      cursor: string | null;
+      status: SourceCheckpointStatus;
+      received_count: number;
+      persisted_count: number;
+      created_count: number;
+      updated_count: number;
+      error_category: string | null;
+      last_success_at: string | null;
+      next_retry_at: string | null;
+      created_at: string;
+      updated_at: string;
+    } | undefined;
+    if (!row) return;
+    this.db.prepare(`
+      INSERT INTO source_checkpoints (
+        source_code, window_start, window_end, cursor, status,
+        received_count, persisted_count, created_count, updated_count, error_category,
+        last_success_at, next_retry_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(source_code, window_start, window_end) DO UPDATE SET
+        cursor = excluded.cursor,
+        status = excluded.status,
+        received_count = excluded.received_count,
+        persisted_count = excluded.persisted_count,
+        created_count = excluded.created_count,
+        updated_count = excluded.updated_count,
+        error_category = excluded.error_category,
+        last_success_at = excluded.last_success_at,
+        next_retry_at = excluded.next_retry_at,
+        updated_at = excluded.updated_at
+    `).run(
+      row.source_code,
+      row.window_start,
+      row.window_end,
+      row.cursor,
+      row.status,
+      row.received_count,
+      row.persisted_count,
+      row.created_count,
+      row.updated_count,
+      row.error_category,
+      row.last_success_at,
+      row.next_retry_at,
+      row.created_at,
+      row.updated_at,
+    );
+  }
+
   private ensureCheckpoint(sourceCode: SourceId, flow: SourceFlow, scopeKey: string, window: SourceWindow, cursor: string | null): void {
     const now = new Date().toISOString();
     this.db.prepare(`
-      INSERT INTO source_checkpoints (
+      INSERT INTO source_checkpoints_scoped (
         source_code, flow, scope_key, window_start, window_end, cursor, status, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, 'RUNNING', ?, ?)
       ON CONFLICT(source_code, flow, scope_key, window_start, window_end) DO UPDATE SET
-        status = CASE WHEN source_checkpoints.status = 'COMPLETED' THEN 'RUNNING' ELSE source_checkpoints.status END,
+        status = CASE WHEN source_checkpoints_scoped.status = 'COMPLETED' THEN 'RUNNING' ELSE source_checkpoints_scoped.status END,
         updated_at = excluded.updated_at
     `).run(sourceCode, flow, scopeKey, window.dateFrom, window.dateTo, cursor, now, now);
   }
@@ -638,7 +714,7 @@ export class SourceSyncRepository {
     now: string,
   ): void {
     this.db.prepare(`
-      UPDATE source_checkpoints
+      UPDATE source_checkpoints_scoped
       SET cursor = ?,
           status = ?,
           received_count = received_count + ?,

@@ -1,7 +1,7 @@
 # Task 7 — Orquestração durável de fontes oficiais
 
 Data: 2026-09-02  
-Status: rodada 3 — corte 1 concluído e verificado localmente
+Status: rodada 5 — pendências de compatibilidade e health checks concluídas e verificadas localmente
 
 ## Correções entregues
 
@@ -89,3 +89,18 @@ Pendências do rereview-2 não incluídas neste corte: compatibilidade/rollout d
 - Durante a validação foi corrigido o bind condicional do tenant no claim da outbox, que deixava o fluxo manual com organização falhar por excesso de parâmetros.
 
 Verificação do corte: focused Task 7 + source checkpoint em 9 arquivos e 42 testes passou. As pendências de migration 023/rollback e health checks efetivos permanecem deliberadamente fora deste corte.
+
+## Rodada 5 — compatibilidade legada e health checks efetivos
+
+- `030_source_checkpoint_compatibility.sql` usa rollout coordenado: `source_checkpoints` continua sendo uma tabela legada com a chave de três colunas aceita pelo `ON CONFLICT` do worker antigo, enquanto o worker novo usa `source_checkpoints_scoped`, com `flow` e `scope_key` separados. O fallback e o espelhamento são limitados a `opportunity/default`; mercado e demais escopos não compartilham cursor.
+- Foi adicionado teste executável que aplica o schema novo, executa duas escritas com o SQL do worker antigo e valida fallback, espelhamento e cursor independente de mercado. O rollback permanece compatível porque a tabela antiga continua disponível durante a migração aditiva.
+- Resume de notificações não é liberado por configuração isolada: cada canal relevante precisa de tentativa controlada saudável ou de resultado `SENT` recente. A pausa sem canal exige que todos os canais configurados estejam saudáveis; override legado não substitui o check de outro estágio.
+- Backup exige destino/artefato existente, arquivo não vazio e `PRAGMA integrity_check` exatamente igual a `ok`. A pausa global só é removida quando o check global e todos os componentes compostos estão saudáveis; componentes saudáveis podem ser limpos sem apagar a condição global ainda inválida.
+
+Verificações finais: focused Task 7 + source checkpoint (11 arquivos, 49 testes), suíte completa (53 arquivos, 192 testes), lint, typecheck e build passaram.
+
+Limitações reais desta rodada:
+
+1. O worker antigo só representa o namespace `opportunity/default`; por isso, o compat layer não espelha mercado nem outros escopos na tabela legada, evitando cursor compartilhado. A troca/rollback entre workers deve respeitar o rollout coordenado.
+2. Sem callback de tentativa controlada, o health check de notificação depende de um envio `SENT` recente persistido; não há chamada automática a provedor externo durante o health check.
+3. Após restart, backup só pode ser considerado saudável quando houver artefato válido no caminho registrado pelas métricas persistidas; sem esse artefato a pausa permanece ativa.

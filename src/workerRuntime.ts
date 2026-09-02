@@ -9,7 +9,7 @@ import { ResendEmailNotifier } from './integrations/notifications/ResendEmailNot
 import { WebPushNotifier } from './integrations/notifications/WebPushNotifier';
 import { logger } from './observability/logger';
 import { BillingService } from './services/billingService';
-import { createDatabaseBackup } from './services/backupService';
+import { createDatabaseBackup, validateDatabaseBackupArtifact } from './services/backupService';
 import { ChecklistService } from './services/checklistService';
 import { AgendaService } from './services/agendaService';
 import { classifyOpportunities, classifyOrganizationOpportunities } from './services/scoring/classificationService';
@@ -347,7 +347,9 @@ export class WorkerRuntime {
       phase = 'backup';
       if (this.env.databaseUrl !== ':memory:' && !hasUnscopedPause(this.systemState, 'backup')) {
         try {
-          metrics.backupPath = this.backup(this.db, this.env.databaseUrl);
+          const backupPath = this.backup(this.db, this.env.databaseUrl);
+          if (!validateDatabaseBackupArtifact(backupPath)) throw new Error('Backup artifact integrity check failed');
+          metrics.backupPath = backupPath;
         } catch (error) {
           this.pauseStage('backup', 'Backup do banco indisponível', error);
         }
@@ -375,23 +377,28 @@ export class WorkerRuntime {
     const current = this.systemState.status();
     if (!current.paused) return true;
     let allHealthy = true;
+    let globalHealthy = true;
+    let componentUnhealthy = false;
     if (current.global) {
-      const healthy = await this.healthCheckFor({
+      globalHealthy = await this.healthCheckFor({
         stage: 'worker',
         reason: current.reason ?? 'Pausa global',
         details: current.details ?? {},
         pausedAt: '',
         updatedAt: '',
       });
-      if (healthy) this.systemState.resume({ stage: 'worker' });
-      else allHealthy = false;
+      if (!globalHealthy) allHealthy = false;
     }
     for (const pause of current.pauses ?? []) {
       if (current.global && pause.stage === 'worker' && !pause.source && !pause.channel) continue;
       const healthy = await this.healthCheckFor(pause);
       if (healthy) this.systemState.resume({ stage: pause.stage, source: pause.source, channel: pause.channel });
-      else allHealthy = false;
+      else {
+        allHealthy = false;
+        componentUnhealthy = true;
+      }
     }
+    if (current.global && globalHealthy && !componentUnhealthy) this.systemState.resume({ stage: 'worker' });
     return allHealthy && !this.systemState.status().paused;
   }
 
@@ -407,12 +414,12 @@ export class WorkerRuntime {
 
   private async healthCheckFor(pause: SystemPauseEntry): Promise<boolean> {
     if (pause.stage === 'notifications') return this.notificationHealthCheck(pause.channel);
+    if (pause.stage === 'backup') return this.backupHealthCheck();
     const custom = this.healthChecks[pause.stage];
     if (custom) return Boolean(await custom());
     if (pause.stage === 'worker' && this.healthCheckOverride) return this.healthCheckOverride();
     if (pause.stage === 'source') return this.sourceSyncService.healthCheck(loadFilters(), this.now(), sourceIdFrom(pause.source));
     if (pause.stage === 'market') return this.marketRefreshService.healthCheck(loadFilters(), this.now(), sourceIdFrom(pause.source));
-    if (pause.stage === 'backup') return this.env.databaseUrl === ':memory:' || this.databaseHealthy();
     return this.databaseHealthy();
   }
 
@@ -425,14 +432,12 @@ export class WorkerRuntime {
         ? this.notifications.hasRecentSuccess(this.recentNotificationSince())
         : this.pushNotifications.hasRecentSuccess(this.recentNotificationSince());
     }
-    const genericCheck = this.healthChecks.notifications;
-    if (genericCheck) return Boolean(await genericCheck());
     const checks: Array<'email' | 'push'> = [];
     if (this.notificationChannelConfigured('email')) checks.push('email');
     if (this.notificationChannelConfigured('push')) checks.push('push');
     if (checks.length === 0) return false;
     const healthy = await Promise.all(checks.map((item) => this.notificationHealthCheck(item)));
-    return healthy.some(Boolean);
+    return healthy.every(Boolean);
   }
 
   private notificationChannelConfigured(channel?: string): boolean {
@@ -447,10 +452,30 @@ export class WorkerRuntime {
 
   private databaseHealthy(): boolean {
     try {
-      return this.db.prepare('PRAGMA integrity_check').get() !== undefined;
+      const result = this.db.prepare('PRAGMA integrity_check').get() as { integrity_check?: unknown } | undefined;
+      return result?.integrity_check === 'ok';
     } catch {
       return false;
     }
+  }
+
+  private async backupHealthCheck(): Promise<boolean> {
+    const custom = this.healthChecks.backup;
+    if (custom && !(await custom())) return false;
+    const latestBackupPath = this.lastBackupPath();
+    return this.databaseHealthy()
+      && latestBackupPath !== null
+      && validateDatabaseBackupArtifact(latestBackupPath);
+  }
+
+  private lastBackupPath(): string | null {
+    const current = this.lastMetrics?.backupPath;
+    if (typeof current === 'string' && current) return current;
+    const persisted = this.metricsRepository.list<WorkerCycleMetrics>(20);
+    const previous = persisted
+      .map((entry) => entry.metrics.backupPath)
+      .find((path): path is string => typeof path === 'string' && path.length > 0);
+    return previous ?? null;
   }
 
   automaticSyncEnabled(): boolean {
