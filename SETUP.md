@@ -107,6 +107,24 @@ npm run e2e:real
 
 Esse fluxo consulta o PNCP, percorre todas as páginas, sincroniza por `pncp_id`, classifica por regras e cria backup.
 
+Para validar o fluxo operacional completo em uma cópia temporária, use:
+
+```powershell
+$env:E2E_DATABASE_URL="C:\temp\aptagov-e2e.db"
+$env:E2E_ALLOW_EXISTING_DATABASE="true"
+npm run e2e:operational-real
+```
+
+O runner repete a sincronização, verifica deduplicação, classifica a organização, coloca uma oportunidade no Kanban, inicializa o checklist, persiste um lembrete, calcula o Mercado e valida um backup. Por segurança, o banco de produção nunca é aceito sem `E2E_ALLOW_EXISTING_DATABASE=true`, e nenhuma notificação real é enviada por padrão. Para testar o e-mail real em um banco temporário, informe também, somente durante a execução:
+
+```powershell
+$env:E2E_ALLOW_NOTIFICATION_DELIVERY="true"
+$env:E2E_NOTIFICATION_EMAIL="seu-email-de-teste@exemplo.com"
+npm run e2e:operational-real
+```
+
+O resultado informa as contagens dos dois ciclos, o estado do Kanban, quantidade de itens do checklist, lembretes, estado do Mercado, validade do backup e entrega idempotente. O e-mail de teste é enviado apenas ao endereço explícito informado.
+
 ### Fontes complementares de dados
 
 Em cada ciclo, o worker consulta o PNCP e a API oficial de Dados Abertos do Compras.gov.br. O endereço padrão já funciona sem credencial; se necessário, ajuste `OPEN_DATA_BASE_URL` no `.env`.
@@ -196,6 +214,7 @@ npm run typecheck
 npm test
 npm run build
 npm run e2e:real
+npm run e2e:operational-real
 ```
 
-O conjunto de testes cobre deduplicação, paginação completa, score, notificações idempotentes, recuperação após reinício, limite de notificações e transições do kanban.
+O conjunto de testes cobre deduplicação, paginação completa, score, notificações idempotentes, recuperação após reinício, limite de notificações e transições do kanban. O E2E operacional deve ser executado com banco temporário; para comprovar entrega real, use as duas variáveis de autorização descritas acima.

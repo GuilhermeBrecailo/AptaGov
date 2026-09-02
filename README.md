@@ -44,6 +44,7 @@ O painel fica em `https://aptagov.site` e o worker continua executando em segund
 - `npm run db:migrate`: aplica migrações.
 - `npm run backup`: cria backup local.
 - `npm run e2e:real`: PNCP + Dados Abertos reais → sincronização → classificação → backup.
+- `npm run e2e:operational-real`: fluxo oficial completo em banco temporário → Kanban → checklist → agenda → Mercado → backup; envio real só com autorização explícita.
 - `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`: verificações.
 
 ## Configuração
