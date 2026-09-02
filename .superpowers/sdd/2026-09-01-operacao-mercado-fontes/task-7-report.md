@@ -1,7 +1,7 @@
 # Task 7 — Orquestração durável de fontes oficiais
 
 Data: 2026-09-02  
-Status: rodada 7 — compatibilidade de rollout/rollback do checkpoint concluída e verificada localmente
+Status: rodada 8 — gaps de tenant e entrega corrigidos e verificados localmente
 
 ## Correções entregues
 
@@ -126,3 +126,16 @@ Limitações residuais:
 
 - A compatibilidade direta fica garantida para o contrato scoped do `0aca7bf`. Workers anteriores à migration 023 que exigem `ON CONFLICT(source_code, window_start, window_end)` continuam usando explicitamente `source_checkpoints_legacy` e não podem compartilhar cursor com market; o rollback deve usar o worker `0aca7bf`/scoped ou uma rotina compatível com a tabela legacy.
 - A execução condicional da migration 031 depende do runner desta aplicação; SQLite não oferece uma forma portátil de condicionar esses `ALTER TABLE` apenas no arquivo SQL. Ferramentas externas de migração devem executar o runner da aplicação ou implementar a mesma guarda.
+
+## Rodada 8 — isolamento por tenant e idempotência de entrega
+
+- `WorkerRuntime` passou a mesclar jobs pendentes e reservas por escopo exato de organização/radar. Um `source_sync` ou `agenda_preparation` pendente de A não impede a reserva e execução do escopo habilitado de B; organizações e radars desabilitados continuam filtrados no modo automático, com seus jobs preservados em `PENDING` para retomada posterior.
+- O e-mail calcula uma chave determinística a partir de organização, oportunidade e `eventKey`; o adaptador Resend envia essa chave no header `Idempotency-Key`. O teste simula falha após o primeiro envio e confirma que o retry usa a mesma chave.
+- O Web Push inclui `eventId` e `dedupeKey` determinísticos no payload. O service worker grava a chave em IndexedDB com chave única antes de exibir a notificação, evitando a segunda exibição quando o mesmo evento for recuperado após a confirmação externa.
+
+Verificações finais: focused Task 7 + source checkpoint (15 arquivos, 62 testes), suíte completa (55 arquivos, 200 testes), lint, typecheck e build passaram.
+
+Limitações residuais desta rodada:
+
+- A deduplicação do Resend depende do provedor respeitar o header de idempotência; o sistema mantém lease, retry e `eventKey` persistidos, sem registrar ou expor credenciais.
+- Web Push não possui confirmação idempotente atômica no protocolo. Com IndexedDB indisponível, falhando ou sendo limpo pelo navegador, o service worker usa fallback fail-open para não perder a entrega; nessa condição residual a semântica é at-least-once e uma duplicidade após crash externo permanece possível.

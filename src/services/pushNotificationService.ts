@@ -15,6 +15,8 @@ export interface PushMessage {
   title: string;
   body: string;
   url: string;
+  eventId: string;
+  dedupeKey: string;
 }
 
 export interface PushSender {
@@ -116,6 +118,8 @@ export class PushNotificationService {
             title: delivery.title,
             body: delivery.body,
             url: delivery.url,
+            eventId: `${delivery.opportunityId}:${delivery.eventKey}`,
+            dedupeKey: `push:${delivery.subscriptionId}:${delivery.opportunityId}:${encodeURIComponent(delivery.eventKey)}`,
           }),
         );
         if (!this.push.markSent(delivery.id, result.providerId, owner)) {

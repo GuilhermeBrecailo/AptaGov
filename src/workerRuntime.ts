@@ -235,7 +235,7 @@ export class WorkerRuntime {
     let notified = 0;
     let phase: WorkerStage = 'source';
 
-    let sourceJobs = pendingDurableJobs.filter((job) => job.type === 'source_sync');
+    const sourceJobs = pendingDurableJobs.filter((job) => job.type === 'source_sync');
     if (canRunAutomatic && !sourcePause.blockAll) {
       for (const scope of scopes) {
         if (sourceJobs.some((job) => jobMatchesScope(job, scope.organizationId, scope.radarId))) continue;
@@ -283,7 +283,7 @@ export class WorkerRuntime {
       phase = 'agenda';
       let agendaPrepared = 0;
       if (!agendaPaused) {
-        let agendaJobs = pendingDurableJobs.filter((job) => job.type === 'agenda_preparation');
+        const agendaJobs = pendingDurableJobs.filter((job) => job.type === 'agenda_preparation');
         const agendaOrganizationIds = new Set(organizations.map((organization) => organization.id));
         for (const scope of scopes) agendaOrganizationIds.add(scope.organizationId);
         for (const organizationId of agendaOrganizationIds) {

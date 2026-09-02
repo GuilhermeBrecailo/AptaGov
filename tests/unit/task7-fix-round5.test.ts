@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FilterConfig, OpportunityInput } from '../../src/domain/types';
 import type { PagedOfficialSourceClient } from '../../src/integrations/sources/OfficialSourceClient';
@@ -8,8 +9,11 @@ import { NotificationRepository } from '../../src/repositories/notificationRepos
 import { OrganizationRepository } from '../../src/repositories/organizationRepository';
 import { OrganizationSyncSettingsRepository } from '../../src/repositories/organizationSyncSettingsRepository';
 import { OpportunityRepository } from '../../src/repositories/opportunityRepository';
+import { PushNotificationRepository } from '../../src/repositories/pushNotificationRepository';
 import { buildPlatformAdminMetrics } from '../../src/services/platformAdminService';
 import { NotificationService, type NotificationSender } from '../../src/services/notificationService';
+import { PushNotificationService, type PushSender } from '../../src/services/pushNotificationService';
+import { UserRepository } from '../../src/repositories/userRepository';
 import { WorkerRuntime } from '../../src/workerRuntime';
 import { loadEnv } from '../../src/config/env';
 
@@ -208,5 +212,33 @@ describe('Task 7 fix round 5: toggle automático e diagnóstico de mercado', () 
 
     expect(requests[0]?.headers.get('Idempotency-Key')).toBe('aptagov:email:1:1:change%3A42');
     expect(requests[0]?.headers.get('Authorization')).toBe('Bearer resend-secret');
+  });
+
+  it('inclui eventId/dedupeKey no push e instala dedupe persistente no service worker', async () => {
+    const db = createTestDatabase();
+    const user = new UserRepository(db).create({ name: 'Push User', email: 'push@example.com', passwordHash: 'hash' });
+    const organization = new OrganizationRepository(db).create('Empresa Push Round 5');
+    new OrganizationRepository(db).addMember(organization.id, user.id, 'OWNER');
+    const opportunityId = new OpportunityRepository(db).insert({
+      pncpId: 'task7-round5-push', title: 'Push', description: '', organization: 'Prefeitura', state: 'SP',
+      sourceUrl: 'https://pncp.gov.br/task7-round5-push', publicationDate: '2026-09-02T10:00:00.000Z', estimatedValueCents: 0,
+    });
+    const pushRepository = new PushNotificationRepository(db);
+    pushRepository.upsertSubscription(user.id, { endpoint: 'https://push.example.test/round5', expirationTime: null, keys: { p256dh: 'p256dh', auth: 'auth' } });
+    const service = new PushNotificationService(db);
+    expect(service.queueOperationalAlert({ organizationId: organization.id, opportunityId, title: 'Push', body: 'Corpo', url: 'https://pncp.gov.br/task7-round5-push', eventType: 'OPPORTUNITY_CHANGE', eventKey: 'change:42' })).toBe(1);
+    const messages: Array<{ eventId?: string; dedupeKey?: string }> = [];
+    const sender: PushSender = {
+      send: async (_delivery, message) => { messages.push(message); return {}; },
+    };
+
+    expect(await service.deliverPending(sender, undefined, { owner: 'push-round5' })).toBe(1);
+
+    expect(messages[0]).toMatchObject({ eventId: `${opportunityId}:change:42`, dedupeKey: 'push:1:1:change%3A42' });
+    const serviceWorker = readFileSync('public/sw.js', 'utf8');
+    expect(serviceWorker).toContain('indexedDB');
+    expect(serviceWorker).toContain('dedupeKey');
+    expect(serviceWorker).toContain('store.add');
+    db.close();
   });
 });

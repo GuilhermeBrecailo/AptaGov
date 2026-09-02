@@ -1,5 +1,47 @@
+/* global indexedDB */
+
 const CACHE_NAME = 'aptagov-shell-v4';
 const OFFLINE_URL = '/offline.html';
+const PUSH_DEDUPE_DB = 'aptagov-push-dedupe-v1';
+const PUSH_DEDUPE_STORE = 'events';
+
+function rememberPushEvent(dedupeKey) {
+  if (!dedupeKey || typeof indexedDB === 'undefined') return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const open = indexedDB.open(PUSH_DEDUPE_DB, 1);
+    open.onupgradeneeded = () => {
+      if (!open.result.objectStoreNames.contains(PUSH_DEDUPE_STORE)) {
+        open.result.createObjectStore(PUSH_DEDUPE_STORE, { keyPath: 'dedupeKey' });
+      }
+    };
+    open.onerror = () => resolve(true);
+    open.onsuccess = () => {
+      const database = open.result;
+      const transaction = database.transaction(PUSH_DEDUPE_STORE, 'readwrite');
+      const store = transaction.objectStore(PUSH_DEDUPE_STORE);
+      let duplicate = false;
+      const request = store.add({ dedupeKey, receivedAt: Date.now() });
+      request.onerror = (error) => {
+        if (request.error?.name === 'ConstraintError') {
+          error.preventDefault();
+          duplicate = true;
+        }
+      };
+      transaction.oncomplete = () => {
+        database.close();
+        resolve(!duplicate);
+      };
+      transaction.onerror = () => {
+        database.close();
+        resolve(true);
+      };
+      transaction.onabort = () => {
+        database.close();
+        resolve(true);
+      };
+    };
+  });
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll([OFFLINE_URL, '/manifest.webmanifest', '/icons/icon.svg'])));
@@ -18,13 +60,17 @@ self.addEventListener('push', (event) => {
   } catch {
     payload = fallback;
   }
-  event.waitUntil(self.registration.showNotification(payload.title, {
-    body: payload.body,
-    icon: '/icons/icon.svg',
-    badge: '/icons/icon.svg',
-    tag: `opportunity-${payload.url}`,
-    data: { url: payload.url },
-  }));
+  event.waitUntil((async () => {
+    const isNew = await rememberPushEvent(typeof payload.dedupeKey === 'string' ? payload.dedupeKey : '');
+    if (!isNew) return;
+    return self.registration.showNotification(payload.title, {
+      body: payload.body,
+      icon: '/icons/icon.svg',
+      badge: '/icons/icon.svg',
+      tag: payload.dedupeKey ? `push-${payload.dedupeKey}` : `opportunity-${payload.url}`,
+      data: { url: payload.url, eventId: payload.eventId, dedupeKey: payload.dedupeKey },
+    });
+  })());
 });
 
 self.addEventListener('notificationclick', (event) => {
