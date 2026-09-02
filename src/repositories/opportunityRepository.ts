@@ -39,6 +39,7 @@ export interface CatalogQuery {
   page?: number;
   pageSize?: number;
   kanbanOnly?: boolean;
+  authorizedOnly?: boolean;
   feedback?: 'favorite' | 'not_relevant';
   hideNotRelevant?: boolean;
   radarFilters?: FilterConfig;
@@ -107,6 +108,18 @@ export class OpportunityRepository {
       params.push(query.state);
     }
     if (query.kanbanOnly) conditions.push('oo.opportunity_id IS NOT NULL');
+    if (query.authorizedOnly) {
+      conditions.push(`(
+        oo.opportunity_id IS NOT NULL
+        OR feedback.status = 'FAVORITED'
+        OR EXISTS (
+          SELECT 1
+          FROM opportunity_reminders reminder_scope
+          WHERE reminder_scope.organization_id = ? AND reminder_scope.opportunity_id = o.id
+        )
+      )`);
+      params.push(organizationId);
+    }
     if (query.feedback === 'favorite') conditions.push("feedback.status = 'FAVORITED'");
     if (query.feedback === 'not_relevant') conditions.push("feedback.status = 'NOT_RELEVANT'");
     if (query.hideNotRelevant !== false && query.feedback !== 'not_relevant') conditions.push("(feedback.status IS NULL OR feedback.status != 'NOT_RELEVANT')");

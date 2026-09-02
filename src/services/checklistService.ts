@@ -1,4 +1,4 @@
-import type { ChecklistItem, ChecklistItemInput, ChecklistPatch, ChecklistTemplateKey } from '../domain/operationalTypes';
+import type { ChecklistItem, ChecklistItemInput, ChecklistPatch } from '../domain/operationalTypes';
 import { ChecklistRepository } from '../repositories/checklistRepository';
 
 const DEFAULT_CHECKLIST_ITEMS: Array<Pick<ChecklistItemInput, 'templateKey' | 'title' | 'category'>> = [
@@ -40,5 +40,9 @@ export class ChecklistService {
 
   update(organizationId: number, id: number, patch: ChecklistPatch): ChecklistItem | undefined {
     return this.repository.update(organizationId, id, patch);
+  }
+
+  updateForOpportunity(organizationId: number, opportunityId: number, id: number, patch: ChecklistPatch): ChecklistItem | undefined {
+    return this.repository.updateForOpportunity(organizationId, opportunityId, id, patch);
   }
 }

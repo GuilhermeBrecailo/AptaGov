@@ -16,7 +16,7 @@ export function handleOpportunitiesGet(input: {
       opportunityId,
       page: 1,
       pageSize: 1,
-      kanbanOnly: stringValue(query.kanbanOnly) === 'true',
+      authorizedOnly: true,
       hideNotRelevant: false,
       sort: stringValue(query.sort) as 'score' | 'deadline' | 'publication' | undefined,
     });

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { watch } from 'vue';
 import AgendaView from '../components/AgendaView.vue';
-import { shouldShowAgendaEntry } from '../viewModels/operationalViewModels';
+import { getReminderVisualType, shouldShowAgendaEntry } from '../viewModels/operationalViewModels';
 import type {
   AgendaEntryView,
   AgendaReminderDraft,
@@ -13,7 +13,6 @@ import type {
   OpportunityReminder,
   OrganizationAlertPreferences,
   ReminderStatus,
-  ReminderType,
 } from '../types';
 
 const { data: auth, error: authError } = await useFetch<AuthPayload>('/api/auth/me');
@@ -147,7 +146,7 @@ function reminderEntry(reminder: OpportunityReminder, opportunity: CatalogOpport
     reminderId: reminder.id,
     reminderType: reminder.type,
     kind: 'REMINDER',
-    visualType: reminder.createdByUserId === null ? reminderVisualType(reminder.type) : 'MANUAL',
+    visualType: getReminderVisualType(reminder.type, reminder.createdByUserId),
     title: reminder.title,
     subtitle: reminder.type,
     occurredAt: reminder.dueAt,
@@ -184,12 +183,6 @@ function changeEntry(change: OpportunityChangeEvent, opportunity: CatalogOpportu
     canSkip: false,
     readAt: change.readAt,
   };
-}
-
-function reminderVisualType(type: ReminderType): AgendaVisualType {
-  if (type === 'BID_DEADLINE') return 'BID_DEADLINE';
-  if (type === 'MEETING') return 'MEETING';
-  return 'MANUAL';
 }
 
 function changeVisualType(type: OpportunityChangeEvent['type']): AgendaVisualType {

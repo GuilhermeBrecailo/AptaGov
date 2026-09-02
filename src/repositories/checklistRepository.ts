@@ -21,6 +21,7 @@ interface ChecklistItemRow {
 export class ChecklistRepository {
   private readonly listStatement;
   private readonly findStatement;
+  private readonly findForOpportunityStatement;
   private readonly insertStatement;
   private readonly updateStatement;
   private readonly ensureDefaultsTransaction;
@@ -34,6 +35,10 @@ export class ChecklistRepository {
     this.findStatement = db.prepare(`
       SELECT * FROM opportunity_checklist_items
       WHERE organization_id = ? AND id = ?
+    `);
+    this.findForOpportunityStatement = db.prepare(`
+      SELECT * FROM opportunity_checklist_items
+      WHERE organization_id = ? AND opportunity_id = ? AND id = ?
     `);
     this.insertStatement = db.prepare(`
       INSERT INTO opportunity_checklist_items (
@@ -56,7 +61,7 @@ export class ChecklistRepository {
         position = @position,
         completed_at = @completedAt,
         updated_at = @updatedAt
-      WHERE organization_id = @organizationId AND id = @id
+      WHERE organization_id = @organizationId AND opportunity_id = @opportunityId AND id = @id
     `);
     this.ensureDefaultsTransaction = db.transaction((items: ChecklistItemInput[]) => {
       for (const item of items) {
@@ -111,9 +116,16 @@ export class ChecklistRepository {
   update(organizationId: number, id: number, patch: ChecklistPatch): ChecklistItem | undefined {
     const current = this.find(organizationId, id);
     if (!current) return undefined;
+    return this.updateForOpportunity(organizationId, current.opportunityId, id, patch);
+  }
+
+  updateForOpportunity(organizationId: number, opportunityId: number, id: number, patch: ChecklistPatch): ChecklistItem | undefined {
+    const current = this.findForOpportunity(organizationId, opportunityId, id);
+    if (!current) return undefined;
     const nextStatus = patch.status ?? current.status;
-    this.updateStatement.run({
+    const result = this.updateStatement.run({
       organizationId,
+      opportunityId,
       id,
       templateKey: patch.templateKey === undefined ? current.templateKey : patch.templateKey,
       title: patch.title?.trim() ?? current.title,
@@ -126,7 +138,8 @@ export class ChecklistRepository {
       completedAt: resolveCompletedAt(nextStatus, patch.completedAt === undefined ? current.completedAt : patch.completedAt),
       updatedAt: new Date().toISOString(),
     });
-    return this.find(organizationId, id);
+    if (result.changes === 0) return undefined;
+    return this.findForOpportunity(organizationId, opportunityId, id);
   }
 
   ensureDefaults(items: ChecklistItemInput[]): void {
@@ -136,6 +149,11 @@ export class ChecklistRepository {
 
   private find(organizationId: number, id: number): ChecklistItem | undefined {
     const row = this.findStatement.get(organizationId, id) as ChecklistItemRow | undefined;
+    return row ? mapRow(row) : undefined;
+  }
+
+  private findForOpportunity(organizationId: number, opportunityId: number, id: number): ChecklistItem | undefined {
+    const row = this.findForOpportunityStatement.get(organizationId, opportunityId, id) as ChecklistItemRow | undefined;
     return row ? mapRow(row) : undefined;
   }
 }

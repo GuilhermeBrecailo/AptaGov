@@ -21,7 +21,7 @@ Implementação concluída em PT-BR para desktop e mobile, conectada às APIs ex
 - Carregamento e atualização de checklists centralizados na página principal, mantendo os componentes de apresentação sem acesso direto a regras ou serviços de domínio.
 - Link da agenda para `/?opportunity=<id>`, que abre o Kanban e seleciona a oportunidade por lookup autorizado direto, mesmo quando ela está além da primeira página.
 - Endpoint de mudanças em lote com isolamento por organização e lookup direto de oportunidades referenciadas por lembretes ou mudanças.
-- Handlers autenticados de GET/PATCH do checklist versionados, com validação de `assigneeUserId` por membership da organização.
+- Handlers autenticados de GET/PATCH do checklist versionados, com validação de `assigneeUserId` por membership da organização e atualização atomicamente escopada por organização, oportunidade e item.
 
 ## Direção visual aplicada
 
@@ -110,9 +110,32 @@ Resultado: `ESLint: No issues found`.
 - Preferências oficiais filtram a exibição atual de lembretes e mudanças, preservando lembretes manuais.
 - Os eventos e handlers de checklist mantêm o `opportunityId` explícito, evitando atualizar o card errado.
 - O editor de lembrete recebeu foco inicial e a primeira coluna da grade mensal teve a borda corrigida durante a revisão.
+- A rerevisão 3 foi incorporada sem ampliar o escopo: o lookup direto da agenda aceita somente oportunidades autorizadas por Kanban, favorito ou lembrete; o PATCH do checklist não altera item de outra oportunidade; e a distinção entre `FOLLOW_UP` oficial (`createdByUserId` nulo) e manual foi centralizada no view model.
 
 ## Concerns conhecidos
 
-- O lint do repositório inteiro ainda encontra um erro pré-existente fora do escopo da Task 4: `src/services/checklistService.ts:1` importa `ChecklistTemplateKey` sem uso. Os arquivos da Task 4 passam no lint focado.
 - O plano em `docs/superpowers/plans/` já estava não versionado no início desta execução e permanece fora do commit da correção.
 - Não houve push, deploy ou manipulação de segredos.
+
+## Rodada de correção da rerevisão 3 — 2026-09-02
+
+- A1: `ChecklistRepository.updateForOpportunity` faz lookup e `UPDATE` com `organizationId + opportunityId + itemId`; o handler retorna 404 sem mutar item de outra oportunidade da mesma organização.
+- A2: o lookup focado de `app/pages/index.vue` deixou de forçar Kanban; o catálogo aplica autorização explícita por Kanban, favorito ou lembrete para `opportunityId`.
+- A3: `getReminderVisualType` classifica `FOLLOW_UP` oficial como `DISPUTE` e manual como `MANUAL`; a filtragem reativa da agenda aplica `preferences.disputeStart` ao oficial e preserva o manual.
+- A4: os exports HTTP dos dois handlers foram exercitados com sessão ausente (401) e billing inativo (402), usando a fixture de `BillingService`; os testes existentes de organização e responsável foram preservados.
+
+### Verificações desta rodada
+
+Comando focado:
+
+`npm exec vitest -- run tests/unit/checklist-api.test.ts tests/unit/checklist-http-protection.test.ts tests/unit/catalog.test.ts tests/unit/operational-view-model.test.ts tests/unit/agenda-api.test.ts tests/unit/operational-ui-contract.test.ts tests/unit/navigation.test.ts`
+
+Resultado: 7 arquivos aprovados, 24 testes aprovados, 0 falhas.
+
+`npm run typecheck`
+
+Resultado: concluído com código 0; tipos do Nuxt gerados e TypeScript sem erros.
+
+Lint focado nos arquivos alterados: concluído sem erros.
+
+`git diff --check`: concluído sem erros de whitespace.

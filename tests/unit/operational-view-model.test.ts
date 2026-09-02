@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildChecklistPresentation, shouldShowAgendaEntry } from '../../app/viewModels/operationalViewModels';
+import { buildChecklistPresentation, getReminderVisualType, shouldShowAgendaEntry } from '../../app/viewModels/operationalViewModels';
 import type { AgendaEntryView, ChecklistItem, OrganizationAlertPreferences } from '../../app/types';
 
 function checklistItem(overrides: Partial<ChecklistItem>): ChecklistItem {
@@ -74,5 +74,18 @@ describe('view models da operacao', () => {
     expect(shouldShowAgendaEntry(agendaEntry({ visualType: 'RESULT' }), preferences)).toBe(false);
     expect(shouldShowAgendaEntry(agendaEntry({ visualType: 'SOURCE_UPDATE' }), preferences)).toBe(false);
     expect(shouldShowAgendaEntry(agendaEntry({ kind: 'REMINDER', visualType: 'MANUAL' }), preferences)).toBe(true);
+  });
+
+  it('diferencia inicio oficial da disputa de follow-up manual', () => {
+    expect(getReminderVisualType('FOLLOW_UP', null)).toBe('DISPUTE');
+    expect(getReminderVisualType('FOLLOW_UP', 42)).toBe('MANUAL');
+    expect(shouldShowAgendaEntry(agendaEntry({ kind: 'REMINDER', visualType: 'DISPUTE' }), {
+      ...allPreferences,
+      disputeStart: false,
+    })).toBe(false);
+    expect(shouldShowAgendaEntry(agendaEntry({ kind: 'REMINDER', visualType: 'MANUAL' }), {
+      ...allPreferences,
+      disputeStart: false,
+    })).toBe(true);
   });
 });

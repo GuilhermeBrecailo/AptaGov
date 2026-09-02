@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createTestDatabase } from '../../src/db/database';
 import { OrganizationRepository } from '../../src/repositories/organizationRepository';
 import { OpportunityRepository } from '../../src/repositories/opportunityRepository';
+import { OpportunityFeedbackRepository } from '../../src/repositories/opportunityFeedbackRepository';
 import { UserRepository } from '../../src/repositories/userRepository';
 import type { FilterConfig } from '../../src/domain/types';
 import { handleOpportunitiesGet } from '../../server/api/opportunities.get';
@@ -92,6 +93,36 @@ describe('catálogo de licitações', () => {
     expect(firstPage.data).not.toContainEqual(expect.objectContaining({ id: opportunityId }));
     expect(direct.data.map((item) => item.id)).toEqual([opportunityId]);
     expect(crossOrganization.data).toEqual([]);
+  });
+
+  it('autoriza busca direta por kanban, favorito ou lembrete da organizacao', () => {
+    const db = createTestDatabase();
+    const organization = new OrganizationRepository(db).create('Empresa Catalogo Autorizado');
+    const opportunities = new OpportunityRepository(db);
+    const kanbanId = opportunities.insert({ pncpId: 'catalog-authorized-kanban', title: 'Kanban', description: '', organization: 'Orgao', state: 'SP', sourceUrl: 'https://pncp.gov.br/kanban', publicationDate: '2026-09-01T10:00:00.000Z', estimatedValueCents: 0 });
+    const favoriteId = opportunities.insert({ pncpId: 'catalog-authorized-favorite', title: 'Favorito', description: '', organization: 'Orgao', state: 'SP', sourceUrl: 'https://pncp.gov.br/favorite', publicationDate: '2026-09-01T10:00:00.000Z', estimatedValueCents: 0 });
+    const reminderId = opportunities.insert({ pncpId: 'catalog-authorized-reminder', title: 'Lembrete', description: '', organization: 'Orgao', state: 'SP', sourceUrl: 'https://pncp.gov.br/reminder', publicationDate: '2026-09-01T10:00:00.000Z', estimatedValueCents: 0 });
+    const outsiderId = opportunities.insert({ pncpId: 'catalog-unauthorized-direct', title: 'Sem autorizacao', description: '', organization: 'Orgao', state: 'SP', sourceUrl: 'https://pncp.gov.br/outsider', publicationDate: '2026-09-01T10:00:00.000Z', estimatedValueCents: 0 });
+
+    opportunities.addToKanban(organization.id, kanbanId);
+    new OpportunityFeedbackRepository(db).save(organization.id, favoriteId, 'FAVORITED');
+    db.prepare(`
+      INSERT INTO opportunity_reminders (
+        organization_id, opportunity_id, type, title, due_at, status, note,
+        created_by_user_id, completed_at, created_at, updated_at
+      ) VALUES (?, ?, 'FOLLOW_UP', ?, ?, 'PENDING', NULL, NULL, NULL, ?, ?)
+    `).run(organization.id, reminderId, 'Lembrete oficial de teste', '2026-09-10T10:00:00.000Z', '2026-09-01T10:00:00.000Z', '2026-09-01T10:00:00.000Z');
+
+    const lookup = (opportunityId: number) => handleOpportunitiesGet({
+      opportunities,
+      organizationId: organization.id,
+      query: { opportunityId: String(opportunityId) },
+    });
+
+    expect(lookup(kanbanId).data.map((item) => item.id)).toEqual([kanbanId]);
+    expect(lookup(favoriteId).data.map((item) => item.id)).toEqual([favoriteId]);
+    expect(lookup(reminderId).data.map((item) => item.id)).toEqual([reminderId]);
+    expect(lookup(outsiderId).data).toEqual([]);
   });
 
   it('aplica os filtros do radar selecionado no catálogo', () => {

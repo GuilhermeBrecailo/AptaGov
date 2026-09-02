@@ -53,8 +53,8 @@ export async function handleOpportunityChecklistPatch(input: {
   }
 
   const checklist = input.service ?? new ChecklistService(new ChecklistRepository(input.db));
-  const updated = checklist.update(input.organizationId, itemId, body);
-  if (!updated || updated.opportunityId !== opportunityId) {
+  const updated = checklist.updateForOpportunity(input.organizationId, opportunityId, itemId, body);
+  if (!updated) {
     throw createError({ statusCode: 404, message: 'Item de preparação não encontrado' });
   }
   return updated;

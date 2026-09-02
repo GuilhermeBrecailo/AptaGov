@@ -1,4 +1,4 @@
-import type { AgendaEntryView, ChecklistItem, OrganizationAlertPreferences } from '../types';
+import type { AgendaEntryView, AgendaVisualType, ChecklistItem, OrganizationAlertPreferences, ReminderType } from '../types';
 
 export interface ChecklistPresentation {
   orderedItems: ChecklistItem[];
@@ -42,6 +42,14 @@ export function shouldShowAgendaEntry(
   if (entry.visualType === 'DISPUTE') return preferences.disputeStart;
   if (entry.visualType === 'RESULT' || entry.visualType === 'SOURCE_UPDATE') return preferences.changeAlerts;
   return true;
+}
+
+export function getReminderVisualType(type: ReminderType, createdByUserId: number | null): AgendaVisualType {
+  if (createdByUserId !== null) return 'MANUAL';
+  if (type === 'BID_DEADLINE') return 'BID_DEADLINE';
+  if (type === 'MEETING') return 'MEETING';
+  if (type === 'FOLLOW_UP') return 'DISPUTE';
+  return 'MANUAL';
 }
 
 function compareChecklistItems(left: ChecklistItem, right: ChecklistItem): number {

@@ -54,7 +54,6 @@ const query = computed(() => {
       opportunityId: focusedOpportunityId.value,
       page: 1,
       pageSize: 1,
-      kanbanOnly: true,
     };
   }
   return {

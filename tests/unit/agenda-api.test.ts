@@ -320,5 +320,7 @@ describe('agenda e histórico operacional via handlers', () => {
     expect(readFileSync(resolve(root, 'opportunities/[id]/changes/[changeId]/read.patch.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
     expect(readFileSync(resolve(root, 'agenda-preferences.get.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
     expect(readFileSync(resolve(root, 'agenda-preferences.put.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
+    expect(readFileSync(resolve(root, 'opportunities/[id]/checklist.get.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
+    expect(readFileSync(resolve(root, 'opportunities/[id]/checklist/[itemId].patch.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
   });
 });
