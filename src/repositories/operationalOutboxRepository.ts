@@ -104,7 +104,7 @@ export class OperationalOutboxRepository {
         WHERE id = ? AND (
           (status IN ('PENDING', 'FAILED') AND attempts < ? AND (next_retry_at IS NULL OR next_retry_at <= ?))
           OR (status = 'PROCESSING' AND lease_until IS NOT NULL AND lease_until <= ?)
-        )
+        )${scope}
       `).run(owner, leaseUntil, nowIso, row.id, MAX_OUTBOX_ATTEMPTS, nowIso, nowIso, ...scopeParams);
       return updated.changes > 0 ? this.find(row.id) : undefined;
     })();

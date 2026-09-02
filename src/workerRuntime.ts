@@ -505,14 +505,23 @@ export class WorkerRuntime {
       const result = await this.withLeaseHeartbeat(job.id, owner, () => this.sourceSyncService.run({
           filters: payload.filters,
           today: new Date(payload.today),
-          organizationId: payload.organizationId,
-          radarId: payload.radarId,
-          scopeKey: payload.scopeKey ?? sourceScopeKey(payload.organizationId, payload.radarId),
-          skipSources: pausedSources.size > 0 ? pausedSources : undefined,
-        }));
-      this.jobs.updateCheckpoint(job.id, { sourceResults: result.sourceResults.map(sourceMetric) }, owner);
-      this.jobs.markCompleted(job.id, owner);
-      metrics.jobsCompleted += 1;
+           organizationId: payload.organizationId,
+           radarId: payload.radarId,
+           scopeKey: payload.scopeKey ?? sourceScopeKey(payload.organizationId, payload.radarId),
+           skipSources: pausedSources.size > 0 ? pausedSources : undefined,
+           throwOnAllFailed: false,
+         }));
+      const sourceResults = result.sourceResults.map(sourceMetric);
+      this.jobs.updateCheckpoint(job.id, { sourceResults }, owner);
+      const allSourcesFailed = result.sourceResults.length > 0
+        && result.sourceResults.every((source) => source.status === 'FAILED');
+      if (allSourcesFailed) {
+        this.jobs.markFailed(job.id, 'Nenhuma fonte oficial disponível', owner);
+        metrics.jobsFailed += 1;
+      } else {
+        this.jobs.markCompleted(job.id, owner);
+        metrics.jobsCompleted += 1;
+      }
       for (const source of result.sourceResults) {
         metrics.sourceResults.push(sourceMetric(source));
         if (source.status === 'FAILED') this.pauseSource(source);

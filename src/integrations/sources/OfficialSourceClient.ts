@@ -319,7 +319,7 @@ function sourceErrorCategory(error: unknown): string {
     if (status === 429) return 'RATE_LIMITED';
     if (status >= 500) return 'UNAVAILABLE';
   }
-  return 'SYNC_FAILED';
+  return 'UNAVAILABLE';
 }
 
 function toPublishedQuery(query: SourceQuery): PublishedQuery {

@@ -34,6 +34,7 @@ export interface SourceSyncRunInput {
   scopeKey?: string;
   onEntry?: (entry: SyncEntry) => void | Promise<void>;
   skipSources?: ReadonlySet<SourceId>;
+  throwOnAllFailed?: boolean;
 }
 
 export interface SourceSyncSourceResult {
@@ -77,7 +78,7 @@ export class SourceSyncService {
     const sourceResults = await Promise.all(clients.map((client) => this.runSource(client, queries, input.onEntry)));
     const entries = sourceResults.flatMap((result) => result.entries);
     const completed = sourceResults.filter((result) => result.status === 'COMPLETED');
-    if (completed.length === 0 && sourceResults.length > 0) {
+    if (completed.length === 0 && sourceResults.length > 0 && input.throwOnAllFailed !== false) {
       const firstFailure = sourceResults[0]?.error;
       throw firstFailure instanceof Error ? firstFailure : new Error('Nenhuma fonte oficial disponivel');
     }
@@ -120,9 +121,11 @@ export class SourceSyncService {
       updated: 0,
       entries: [],
     };
+    let failedQuery: SourceQuery | undefined;
     try {
       await this.breaker(client.id).execute(async () => {
         for (const query of queries) {
+          failedQuery = query;
           const result = await syncSourceOpportunities(client, query, this.options.repository, {
             onEntry: async (entry) => {
               const normalized: SyncEntry = {
@@ -139,15 +142,14 @@ export class SourceSyncService {
       return total;
     } catch (error) {
       const errorCategory = classifySourceError(error);
-      const firstQuery = queries[0];
-      if (firstQuery) {
+      if (failedQuery) {
         this.options.repository.recordFailure(
           client.id,
-          windowOf(firstQuery),
+          windowOf(failedQuery),
           errorCategory,
           retryAt(errorCategory),
-          firstQuery.flow ?? 'opportunity',
-          firstQuery.scopeKey ?? 'default',
+          failedQuery.flow ?? 'opportunity',
+          failedQuery.scopeKey ?? 'default',
         );
       }
       return {

@@ -80,3 +80,12 @@ Focused desta etapa: `tests/unit/task7-fix-round3.test.ts` passou com 7/7 testes
 Verificações do corte 1: focused de concorrência/lease/reclaim/fingerprint em 6 arquivos e 24 testes passou; `npm run lint` e `npm run typecheck` passaram. A migration 029 foi incluída neste corte.
 
 Pendências do rereview-2 não incluídas neste corte: compatibilidade/rollout da migration 023, isolamento de `recordFailure` em queries compostas, health checks efetivos de backup/global/notificações e preservação de resultados por fonte em falha total do ciclo.
+
+## Rodada 4 — corte parcial: falha por query e métricas por fonte
+
+- `SourceSyncService` mantém a query atualmente processada e registra `recordFailure` no `flow`/`scopeKey` correto. Uma falha em uma query composta não rebaixa o checkpoint concluído de outra query; os `source_runs` permanecem isolados por escopo.
+- A API mantém o comportamento anterior de lançar quando todas as fontes falham por padrão. O worker usa uma opção explícita para receber o resultado detalhado, registrar cada fonte como `FAILED` com categoria e persistir o job/ciclo com o diagnóstico completo.
+- `source_runs` e `worker_cycle_metrics` agora preservam falhas por fonte no ciclo e no painel administrativo, incluindo fontes distintas no mesmo ciclo.
+- Durante a validação foi corrigido o bind condicional do tenant no claim da outbox, que deixava o fluxo manual com organização falhar por excesso de parâmetros.
+
+Verificação do corte: focused Task 7 + source checkpoint em 9 arquivos e 42 testes passou. As pendências de migration 023/rollback e health checks efetivos permanecem deliberadamente fora deste corte.
