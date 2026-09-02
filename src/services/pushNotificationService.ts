@@ -89,6 +89,10 @@ export class PushNotificationService {
     return this.push.pendingCount(organizationId);
   }
 
+  hasRecentSuccess(since: string): boolean {
+    return this.push.hasRecentSuccess(since);
+  }
+
   async deliverPending(sender: PushSender, organizationId?: number): Promise<number> {
     let delivered = 0;
     for (const delivery of this.push.listPending(100, organizationId)) {

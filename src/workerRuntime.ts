@@ -79,6 +79,7 @@ export interface WorkerRuntimeDependencies {
   now?: () => Date;
   healthCheck?: () => Promise<boolean>;
   healthChecks?: Partial<Record<WorkerStage, () => boolean | Promise<boolean>>>;
+  notificationHealthChecks?: Partial<Record<'email' | 'push', () => boolean | Promise<boolean>>>;
   workerId?: string;
 }
 
@@ -138,6 +139,7 @@ export class WorkerRuntime {
   private readonly backup: typeof createDatabaseBackup;
   private readonly healthCheckOverride?: () => Promise<boolean>;
   private readonly healthChecks: Partial<Record<WorkerStage, () => boolean | Promise<boolean>>>;
+  private readonly notificationHealthChecks: Partial<Record<'email' | 'push', () => boolean | Promise<boolean>>>;
   private readonly workerId: string;
   private readonly outbox: OperationalOutboxRepository;
   private readonly metricsRepository: WorkerMetricsRepository;
@@ -154,6 +156,7 @@ export class WorkerRuntime {
     this.backup = dependencies.backup ?? createDatabaseBackup;
     this.healthCheckOverride = dependencies.healthCheck;
     this.healthChecks = dependencies.healthChecks ?? {};
+    this.notificationHealthChecks = dependencies.notificationHealthChecks ?? {};
     this.workerId = dependencies.workerId ?? `worker:${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
     this.opportunities = new OpportunityRepository(this.db);
     this.jobs = new JobRepository(this.db);
@@ -178,11 +181,15 @@ export class WorkerRuntime {
   async runCycle(options: WorkerCycleOptions = {}): Promise<WorkerCycleResult> {
     const cycleStarted = this.now();
     const cycleStartedAt = cycleStarted.toISOString();
+    const mode = options.mode ?? 'automatic';
+    if (mode === 'manual' && options.organizationId !== undefined && options.radarId !== undefined
+      && !this.manualRadarBelongsToOrganization(options.organizationId, options.radarId)) {
+      throw new Error('Radar não pertence à organização informada');
+    }
     const recovered = this.jobs.recoverInterrupted(this.now(), this.env.workerLeaseMs);
     const currentPause = this.systemState.status();
     const legacyJobs = this.jobs.list('PENDING').filter((job) => job.type === 'sync_and_classify');
     const metrics = newMetrics(cycleStartedAt, recovered.length);
-    const mode = options.mode ?? 'automatic';
     const enabledOrganizationIds = this.syncSettings.listEnabledOrganizationIds();
     const canRunAutomatic = shouldRunSync(mode, enabledOrganizationIds.length > 0);
 
@@ -367,19 +374,25 @@ export class WorkerRuntime {
   async resumeAfterHealthCheck(): Promise<boolean> {
     const current = this.systemState.status();
     if (!current.paused) return true;
-    if (current.pauses?.length === 0 || !current.pauses) {
-      const healthy = this.healthCheckOverride ? await this.healthCheckOverride() : true;
-      if (!healthy) return false;
-      this.systemState.resume();
-      return true;
-    }
     let allHealthy = true;
-    for (const pause of current.pauses) {
+    if (current.global) {
+      const healthy = await this.healthCheckFor({
+        stage: 'worker',
+        reason: current.reason ?? 'Pausa global',
+        details: current.details ?? {},
+        pausedAt: '',
+        updatedAt: '',
+      });
+      if (healthy) this.systemState.resume({ stage: 'worker' });
+      else allHealthy = false;
+    }
+    for (const pause of current.pauses ?? []) {
+      if (current.global && pause.stage === 'worker' && !pause.source && !pause.channel) continue;
       const healthy = await this.healthCheckFor(pause);
       if (healthy) this.systemState.resume({ stage: pause.stage, source: pause.source, channel: pause.channel });
       else allHealthy = false;
     }
-    return allHealthy;
+    return allHealthy && !this.systemState.status().paused;
   }
 
   health(): WorkerCycleMetrics | null {
@@ -393,20 +406,43 @@ export class WorkerRuntime {
   }
 
   private async healthCheckFor(pause: SystemPauseEntry): Promise<boolean> {
+    if (pause.stage === 'notifications') return this.notificationHealthCheck(pause.channel);
     const custom = this.healthChecks[pause.stage];
     if (custom) return Boolean(await custom());
-    if (this.healthCheckOverride) return this.healthCheckOverride();
+    if (pause.stage === 'worker' && this.healthCheckOverride) return this.healthCheckOverride();
     if (pause.stage === 'source') return this.sourceSyncService.healthCheck(loadFilters(), this.now(), sourceIdFrom(pause.source));
     if (pause.stage === 'market') return this.marketRefreshService.healthCheck(loadFilters(), this.now(), sourceIdFrom(pause.source));
-    if (pause.stage === 'notifications') return this.notificationChannelConfigured(pause.channel);
     if (pause.stage === 'backup') return this.env.databaseUrl === ':memory:' || this.databaseHealthy();
     return this.databaseHealthy();
+  }
+
+  private async notificationHealthCheck(channel?: string): Promise<boolean> {
+    if (channel === 'email' || channel === 'push') {
+      const controlledCheck = this.notificationHealthChecks[channel];
+      if (controlledCheck) return Boolean(await controlledCheck());
+      if (!this.notificationChannelConfigured(channel)) return false;
+      return channel === 'email'
+        ? this.notifications.hasRecentSuccess(this.recentNotificationSince())
+        : this.pushNotifications.hasRecentSuccess(this.recentNotificationSince());
+    }
+    const genericCheck = this.healthChecks.notifications;
+    if (genericCheck) return Boolean(await genericCheck());
+    const checks: Array<'email' | 'push'> = [];
+    if (this.notificationChannelConfigured('email')) checks.push('email');
+    if (this.notificationChannelConfigured('push')) checks.push('push');
+    if (checks.length === 0) return false;
+    const healthy = await Promise.all(checks.map((item) => this.notificationHealthCheck(item)));
+    return healthy.some(Boolean);
   }
 
   private notificationChannelConfigured(channel?: string): boolean {
     if (channel === 'email') return Boolean(this.env.resendApiKey && this.env.notificationEmailFrom);
     if (channel === 'push') return this.pushNotifications.isConfigured(this.env.vapidSubject, this.env.vapidPublicKey, this.env.vapidPrivateKey);
     return true;
+  }
+
+  private recentNotificationSince(): string {
+    return new Date(this.now().getTime() - 15 * 60_000).toISOString();
   }
 
   private databaseHealthy(): boolean {
@@ -419,6 +455,10 @@ export class WorkerRuntime {
 
   automaticSyncEnabled(): boolean {
     return this.syncSettings.listEnabledOrganizationIds().length > 0;
+  }
+
+  manualRadarBelongsToOrganization(organizationId: number, radarId: number): boolean {
+    return Boolean(this.savedSearches.find(organizationId, radarId));
   }
 
   close(): void {
@@ -698,7 +738,7 @@ function isDurableJob(job: JobRecord): boolean {
 }
 
 function isGlobalPause(pause: ReturnType<SystemStateRepository['status']>): boolean {
-  return pause.paused && (!pause.pauses || pause.pauses.length === 0) && typeof pause.details?.stage !== 'string';
+  return pause.paused && pause.global === true;
 }
 
 function hasUnscopedPause(repository: SystemStateRepository, stage: WorkerStage): boolean {

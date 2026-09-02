@@ -1,7 +1,7 @@
 # Task 7 — Orquestração durável de fontes oficiais
 
 Data: 2026-09-02  
-Status: corte parcial da rodada 2 implementado e verificado
+Status: rodada 2 concluída e verificada localmente
 
 ## Correções entregues
 
@@ -20,6 +20,8 @@ Status: corte parcial da rodada 2 implementado e verificado
 - `024_worker_outbox.sql`: outbox durável com chave idempotente, tentativas e lease.
 - `025_worker_pauses.sql`: pausas compostas por estágio/fonte/canal.
 - `026_worker_cycle_metrics.sql`: métricas persistentes por ciclo/modo.
+- `027_durable_worker_followup.sql`: retry da outbox, backfill de tenant e single-flight terminal.
+- `028_legacy_job_scope.sql`: marca globais legados e encerra payloads de tenant incompatíveis.
 
 As tabelas e colunas existentes foram preservadas; o comportamento manual, automático, scheduler, classificação, notificações e backup continua compatível.
 
@@ -51,4 +53,15 @@ Este corte trata somente retry durável da outbox e single-flight/lease dos jobs
 
 Verificações do corte: focused Task 7 em 9 arquivos/30 testes, lint e typecheck passaram. A suíte completa ainda não foi rodada neste corte; a regressão de `source-checkpoint` e as demais pendências do rereview continuam abertas. Build também permanece pendente.
 
-Pendências deliberadamente não implementadas neste corte: coerência da pausa global legada com pausas compostas, health check efetivo por canal de notificação sem fallback indevido do override, compatibilidade de leitura do checkpoint sem fluxo e falha no escopo correto, validação de `radarId` por organização, exposição administrativa de `source_runs`/métricas e fechamento dos status/categorias/órfãos legados.
+As pendências listadas acima foram tratadas na rodada 3; permanecem apenas as limitações concretas abaixo.
+
+## Rodada 3 — fechamento das pendências operacionais
+
+- A pausa global legada agora é identificada explicitamente no status mesmo quando coexistem pausas compostas. Ela bloqueia todos os estágios; resume seletivo remove somente a condição selecionada e não apaga a pausa global. `result.paused` deriva da visão persistida.
+- Resume de notificações usa check por canal: override legado só atende a pausa global do worker, enquanto canais usam tentativa controlada injetável ou um resultado `SENT` recente, além da configuração. Nenhuma credencial ou mensagem bruta é retornada/logada pelo painel.
+- A API de leitura de checkpoint sem fluxo mantém compatibilidade apenas como fallback explícito quando há um único checkpoint de mercado para a janela; gravações e leituras com `flow`/`scopeKey` continuam separadas. Falhas do sync preservam o fluxo/escopo da query que falhou.
+- Sync manual rejeita radar inexistente ou pertencente a outra organização tanto no runtime quanto no endpoint HTTP.
+- O endpoint administrativo existente passa a expor `sourceRuns` e ciclos do worker com contagens, status e categorias de erro, omitindo `error_message`, payloads, cursores e caminhos de backup.
+- Jobs legados com tenant válido são reivindicáveis pelo payload quando necessário; globais são marcados explicitamente e payloads incompatíveis deixam de ser órfãos em `PENDING`. Jobs inválidos também são terminalizados pelo runtime.
+
+Focused desta etapa: `tests/unit/task7-fix-round3.test.ts` passou com 7/7 testes; `tests/unit/source-checkpoint.test.ts` passou com 10/10; lint passou. A suíte completa, typecheck e build serão registrados após a verificação final desta rodada.

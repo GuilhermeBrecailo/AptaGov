@@ -142,8 +142,8 @@ export class JobRepository {
     return this.db.prepare(`
       UPDATE job_runs
       SET status = 'FAILED', error_message = ?, finished_at = ?, lease_owner = NULL, lease_until = NULL
-      WHERE id = ?${ownerCondition} AND status = 'RUNNING'
-    `).run(...params).changes > 0;
+      WHERE id = ?${ownerCondition} AND (status = 'RUNNING' OR (status = 'PENDING' AND ? = 1))
+    `).run(...params, owner ? 0 : 1).changes > 0;
   }
 
   updateCheckpoint(id: number, checkpoint: Record<string, unknown>, owner?: string): boolean {

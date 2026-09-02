@@ -2,6 +2,7 @@ import type { SqliteDatabase } from '../db/database';
 
 export interface SystemPause {
   paused: boolean;
+  global?: boolean;
   reason: string | null;
   details?: Record<string, unknown>;
   pauses?: SystemPauseEntry[];
@@ -66,6 +67,11 @@ export class SystemStateRepository {
       this.db.prepare('DELETE FROM worker_pauses').run();
       return;
     }
+    if (selector.stage === 'worker' && selector.source === undefined && selector.channel === undefined) {
+      this.db.prepare("DELETE FROM system_state WHERE key = 'worker_pause'").run();
+      this.db.prepare("DELETE FROM worker_pauses WHERE stage = 'worker' AND source = '' AND channel = ''").run();
+      return;
+    }
     const conditions: string[] = [];
     const params: Array<string> = [];
     if (selector.stage) { conditions.push('stage = ?'); params.push(selector.stage); }
@@ -83,14 +89,25 @@ export class SystemStateRepository {
   status(): SystemPause {
     const row = this.db.prepare("SELECT value FROM system_state WHERE key = 'worker_pause'").get() as { value: string } | undefined;
     const pauses = this.listPauses();
-    if (!row && pauses.length === 0) return { paused: false, reason: null };
+    const globalPause = pauses.find((pause) => pause.stage === 'worker' && !pause.source && !pause.channel);
+    if (!row && pauses.length === 0) return { paused: false, global: false, reason: null };
     if (row) {
       const legacy = JSON.parse(row.value) as SystemPause;
-      return { ...legacy, paused: true, pauses };
+      return { ...legacy, paused: true, global: true, pauses };
+    }
+    if (globalPause) {
+      return {
+        paused: true,
+        global: true,
+        reason: globalPause.reason,
+        details: { ...globalPause.details, stage: 'worker' },
+        pauses,
+      };
     }
     const latest = pauses[pauses.length - 1]!;
     return {
       paused: true,
+      global: false,
       reason: latest.reason,
       details: { ...latest.details, stage: latest.stage, ...(latest.source ? { source: latest.source } : {}), ...(latest.channel ? { channel: latest.channel } : {}) },
       pauses,
@@ -111,7 +128,8 @@ export class SystemStateRepository {
   }
 
   private isGloballyPaused(): boolean {
-    return Boolean(this.db.prepare("SELECT 1 FROM system_state WHERE key = 'worker_pause'").get());
+    return Boolean(this.db.prepare("SELECT 1 FROM system_state WHERE key = 'worker_pause'").get())
+      || Boolean(this.db.prepare("SELECT 1 FROM worker_pauses WHERE stage = 'worker' AND source = '' AND channel = ''").get());
   }
 }
 

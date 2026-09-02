@@ -144,6 +144,10 @@ export class NotificationService {
     return this.notifications.pendingCount(organizationId);
   }
 
+  hasRecentSuccess(since: string): boolean {
+    return this.notifications.hasRecentSuccess(since);
+  }
+
   settings(organizationId: number): NotificationSettings | undefined {
     return this.notifications.findSettings(organizationId);
   }

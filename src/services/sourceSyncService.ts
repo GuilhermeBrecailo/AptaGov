@@ -146,6 +146,8 @@ export class SourceSyncService {
           windowOf(firstQuery),
           errorCategory,
           retryAt(errorCategory),
+          firstQuery.flow ?? 'opportunity',
+          firstQuery.scopeKey ?? 'default',
         );
       }
       return {

@@ -31,6 +31,60 @@ export interface PlatformAdminMetrics {
     createdAt: string;
     lastActivityAt: string;
   }>;
+  worker: PlatformWorkerMetrics;
+}
+
+export interface PlatformWorkerMetrics {
+  sourceRuns: Array<{
+    id: number;
+    source: string;
+    flow: string;
+    scopeKey: string;
+    windowStart: string;
+    windowEnd: string;
+    status: string;
+    received: number;
+    persisted: number;
+    created: number;
+    updated: number;
+    errorCategory: string | null;
+    startedAt: string;
+    finishedAt: string | null;
+  }>;
+  cycles: Array<{
+    id: number;
+    mode: 'automatic' | 'manual';
+    startedAt: string;
+    finishedAt: string;
+    paused: boolean;
+    jobsRecovered: number;
+    jobsCreated: number;
+    jobsCompleted: number;
+    jobsFailed: number;
+    outboxProcessed: number;
+    outboxFailed: number;
+    agendaPrepared: number;
+    notificationsQueued: number;
+    notificationsDelivered: number;
+    sourceResults: Array<{
+      source: string;
+      status: string;
+      received: number;
+      persisted: number;
+      created: number;
+      updated: number;
+      errorCategory: string | null;
+    }>;
+    marketSourceResults: Array<{
+      source: string;
+      status: string;
+      received: number;
+      persisted: number;
+      created: number;
+      updated: number;
+      errorCategory: string | null;
+    }>;
+  }>;
 }
 
 export function buildPlatformAdminMetrics(db: SqliteDatabase, plans: BillingPlanDefinition[], now = new Date()): PlatformAdminMetrics {
@@ -101,7 +155,126 @@ export function buildPlatformAdminMetrics(db: SqliteDatabase, plans: BillingPlan
       createdAt: organization.created_at,
       lastActivityAt: organization.last_activity_at,
     })),
+    worker: buildWorkerMetrics(db),
   };
+}
+
+function buildWorkerMetrics(db: SqliteDatabase): PlatformWorkerMetrics {
+  const sourceRuns = db.prepare(`
+    SELECT id, source_code, flow, scope_key, window_start, window_end, status,
+      received_count, persisted_count, created_count, updated_count, error_category,
+      started_at, finished_at
+    FROM source_runs
+    ORDER BY started_at DESC, id DESC
+    LIMIT 100
+  `).all() as SourceRunAdminRow[];
+  const cycles = db.prepare(`
+    SELECT id, mode, started_at, finished_at, paused, metrics_json
+    FROM worker_cycle_metrics
+    ORDER BY finished_at DESC, id DESC
+    LIMIT 20
+  `).all() as WorkerCycleAdminRow[];
+  return {
+    sourceRuns: sourceRuns.map((run) => ({
+      id: run.id,
+      source: run.source_code,
+      flow: run.flow,
+      scopeKey: run.scope_key,
+      windowStart: run.window_start,
+      windowEnd: run.window_end,
+      status: run.status,
+      received: run.received_count,
+      persisted: run.persisted_count,
+      created: run.created_count,
+      updated: run.updated_count,
+      errorCategory: run.error_category,
+      startedAt: run.started_at,
+      finishedAt: run.finished_at,
+    })),
+    cycles: cycles.map((cycle) => {
+      const metrics = parseRecord(cycle.metrics_json);
+      return {
+        id: cycle.id,
+        mode: cycle.mode,
+        startedAt: cycle.started_at,
+        finishedAt: cycle.finished_at,
+        paused: cycle.paused === 1,
+        jobsRecovered: numberValue(metrics.jobsRecovered),
+        jobsCreated: numberValue(metrics.jobsCreated),
+        jobsCompleted: numberValue(metrics.jobsCompleted),
+        jobsFailed: numberValue(metrics.jobsFailed),
+        outboxProcessed: numberValue(metrics.outboxProcessed),
+        outboxFailed: numberValue(metrics.outboxFailed),
+        agendaPrepared: numberValue(metrics.agendaPrepared),
+        notificationsQueued: numberValue(metrics.notificationsQueued),
+        notificationsDelivered: numberValue(metrics.notificationsDelivered),
+        sourceResults: safeSourceResults(metrics.sourceResults),
+        marketSourceResults: isRecord(metrics.marketRefresh)
+          ? safeSourceResults(metrics.marketRefresh.sourceResults)
+          : [],
+      };
+    }),
+  };
+}
+
+interface SourceRunAdminRow {
+  id: number;
+  source_code: string;
+  flow: string;
+  scope_key: string;
+  window_start: string;
+  window_end: string;
+  status: string;
+  received_count: number;
+  persisted_count: number;
+  created_count: number;
+  updated_count: number;
+  error_category: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+interface WorkerCycleAdminRow {
+  id: number;
+  mode: 'automatic' | 'manual';
+  started_at: string;
+  finished_at: string;
+  paused: number;
+  metrics_json: string;
+}
+
+function safeSourceResults(value: unknown): PlatformWorkerMetrics['cycles'][number]['sourceResults'] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isRecord).map((source) => ({
+    source: stringValue(source.source),
+    status: stringValue(source.status),
+    received: numberValue(source.received),
+    persisted: numberValue(source.persisted),
+    created: numberValue(source.created),
+    updated: numberValue(source.updated),
+    errorCategory: source.errorCategory === null ? null : stringValue(source.errorCategory),
+  }));
+}
+
+function parseRecord(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return isRecord(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function numberValue(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
 function count(db: SqliteDatabase, query: string): number {

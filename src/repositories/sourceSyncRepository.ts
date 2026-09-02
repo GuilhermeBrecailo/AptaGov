@@ -514,15 +514,25 @@ export class SourceSyncRepository {
     }));
   }
 
-  getCheckpoint(sourceCode: SourceId, window: SourceWindow, flow: SourceFlow = 'opportunity', scopeKey = 'default'): SourceCheckpoint | undefined {
+  getCheckpoint(sourceCode: SourceId, window: SourceWindow, flow?: SourceFlow, scopeKey = 'default'): SourceCheckpoint | undefined {
+    const requestedFlow = flow ?? 'opportunity';
     const row = this.db.prepare(`
       SELECT * FROM source_checkpoints
       WHERE source_code = ? AND flow = ? AND scope_key = ? AND window_start = ? AND window_end = ?
-    `).get(sourceCode, flow, scopeKey, window.dateFrom, window.dateTo) as CheckpointRow | undefined;
-    return row ? mapCheckpoint(row) : undefined;
+    `).get(sourceCode, requestedFlow, scopeKey, window.dateFrom, window.dateTo) as CheckpointRow | undefined;
+    if (row || flow !== undefined) return row ? mapCheckpoint(row) : undefined;
+    const compatibleMarketRows = this.db.prepare(`
+      SELECT * FROM source_checkpoints
+      WHERE source_code = ? AND flow = 'market' AND window_start = ? AND window_end = ?
+      ORDER BY updated_at DESC
+      LIMIT 2
+    `).all(sourceCode, window.dateFrom, window.dateTo) as CheckpointRow[];
+    return compatibleMarketRows.length === 1 && compatibleMarketRows[0]
+      ? mapCheckpoint(compatibleMarketRows[0])
+      : undefined;
   }
 
-  getResumeCursor(sourceCode: SourceId, window: SourceWindow, flow: SourceFlow = 'opportunity', scopeKey = 'default'): string | null {
+  getResumeCursor(sourceCode: SourceId, window: SourceWindow, flow?: SourceFlow, scopeKey = 'default'): string | null {
     const checkpoint = this.getCheckpoint(sourceCode, window, flow, scopeKey);
     return checkpoint?.status === 'COMPLETED' ? null : checkpoint?.cursor ?? null;
   }

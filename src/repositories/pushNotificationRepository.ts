@@ -263,6 +263,10 @@ export class PushNotificationRepository {
     `).get(organizationId) as { count: number }).count;
   }
 
+  hasRecentSuccess(since: string): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM push_deliveries WHERE status = 'SENT' AND sent_at >= ? LIMIT 1").get(since));
+  }
+
   markSent(id: number, providerId?: string): void {
     const now = new Date().toISOString();
     this.db.prepare("UPDATE push_deliveries SET status = 'SENT', provider_id = ?, sent_at = ?, updated_at = ? WHERE id = ?")

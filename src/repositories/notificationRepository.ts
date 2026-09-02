@@ -100,6 +100,10 @@ export class NotificationRepository {
     return row.count;
   }
 
+  hasRecentSuccess(since: string): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM notification_deliveries WHERE status = 'SENT' AND sent_at >= ? LIMIT 1").get(since));
+  }
+
   list(organizationId?: number): NotificationDelivery[] {
     const rows = organizationId === undefined
       ? this.db.prepare('SELECT * FROM notification_deliveries ORDER BY created_at').all() as NotificationDeliveryRow[]
