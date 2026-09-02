@@ -64,7 +64,7 @@ describe('contrato do worker runtime', () => {
     settings.save(organization.id, false);
     const legacyJobRepository = new JobRepository(db);
     const legacyJobId = legacyJobRepository.create('sync_and_classify');
-    legacyJobRepository.markRunning(legacyJobId);
+    legacyJobRepository.markRunning(legacyJobId, 'crashed-runtime', -1);
     const runtime = new WorkerRuntime(loadEnv({ NODE_ENV: 'test', DATABASE_URL: ':memory:' }), db, {
       sourceClients: [sourceClient()],
     });
@@ -92,7 +92,7 @@ describe('contrato do worker runtime', () => {
       filters,
       today: '2026-08-31T12:00:00.000Z',
     }, 'source_sync:automatic:1:default:recovered');
-    jobRepository.markRunning(jobId);
+    jobRepository.markRunning(jobId, 'crashed-runtime', -1);
     const runtime = new WorkerRuntime(loadEnv({ NODE_ENV: 'test', DATABASE_URL: ':memory:' }), db, {
       sourceClients: [sourceClient()],
     });

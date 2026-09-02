@@ -85,13 +85,13 @@ export class PushNotificationService {
     return this.push.queueOperationalAlert(input);
   }
 
-  pendingCount(): number {
-    return this.push.pendingCount();
+  pendingCount(organizationId?: number): number {
+    return this.push.pendingCount(organizationId);
   }
 
-  async deliverPending(sender: PushSender): Promise<number> {
+  async deliverPending(sender: PushSender, organizationId?: number): Promise<number> {
     let delivered = 0;
-    for (const delivery of this.push.listPending()) {
+    for (const delivery of this.push.listPending(100, organizationId)) {
       try {
         const result = await sender.send(delivery, {
           title: delivery.title,

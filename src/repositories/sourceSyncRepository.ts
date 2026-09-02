@@ -3,15 +3,20 @@ import type {
   MarketObservationInput,
   MarketResultInput,
   SourceId,
+  SourceFlow,
   SourceWindow,
 } from '../domain/sourceTypes';
 import type { Opportunity, OpportunityInput } from '../domain/types';
 import { OpportunityRepository } from './opportunityRepository';
+import { OperationalOutboxRepository } from './operationalOutboxRepository';
 
 export type SourceCheckpointStatus = 'RUNNING' | 'COMPLETED' | 'FAILED';
+export type { SourceFlow } from '../domain/sourceTypes';
 
 export interface SourceCheckpoint {
   sourceCode: SourceId;
+  flow: SourceFlow;
+  scopeKey: string;
   window: SourceWindow;
   cursor: string | null;
   status: SourceCheckpointStatus;
@@ -29,6 +34,8 @@ export interface SourceCheckpoint {
 export interface SourceRun {
   id: number;
   sourceCode: SourceId;
+  flow: SourceFlow;
+  scopeKey: string;
   window: SourceWindow;
   cursor: string | null;
   status: SourceCheckpointStatus;
@@ -50,6 +57,9 @@ export interface PersistOpportunityPageInput {
   cursor: string | null;
   nextCursor: string | null;
   items: OpportunityInput[];
+  scopeKey?: string;
+  organizationId?: number | null;
+  radarId?: number | null;
 }
 
 export interface PersistMarketPageInput {
@@ -71,10 +81,13 @@ export interface PersistMarketBundlePageInput {
   nextCursor: string | null;
   observations: MarketObservationInput[];
   results: MarketResultInput[];
+  scopeKey?: string;
 }
 
 interface CheckpointRow {
   source_code: SourceId;
+  flow: SourceFlow;
+  scope_key: string;
   window_start: string;
   window_end: string;
   cursor: string | null;
@@ -86,6 +99,27 @@ interface CheckpointRow {
   error_category: string | null;
   last_success_at: string | null;
   next_retry_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface SourceRunRow {
+  id: number;
+  source_code: SourceId;
+  flow: SourceFlow;
+  scope_key: string;
+  window_start: string;
+  window_end: string;
+  cursor: string | null;
+  status: SourceCheckpointStatus;
+  received_count: number;
+  persisted_count: number;
+  created_count: number;
+  updated_count: number;
+  error_category: string | null;
+  error_message: string | null;
+  started_at: string;
+  finished_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -136,20 +170,26 @@ interface MarketResultRow {
 export interface PersistPageResult {
   created: number;
   updated: number;
+  persisted: number;
   checkpoint: SourceCheckpoint;
   entries?: Array<{ previous?: Opportunity; current: Opportunity }>;
 }
 
 export class SourceSyncRepository {
+  private readonly outbox: OperationalOutboxRepository;
+
   constructor(
     private readonly db: SqliteDatabase,
     private readonly opportunities = new OpportunityRepository(db),
-  ) {}
+  ) {
+    this.outbox = new OperationalOutboxRepository(db);
+  }
 
   persistOpportunityPage(input: PersistOpportunityPageInput): PersistPageResult {
     assertSourceItems(input.sourceCode, input.items);
+    const scopeKey = input.scopeKey ?? 'default';
     const result = this.db.transaction(() => {
-      this.ensureCheckpoint(input.sourceCode, input.window, input.cursor);
+      this.ensureCheckpoint(input.sourceCode, 'opportunity', scopeKey, input.window, input.cursor);
       let created = 0;
       let updated = 0;
       let persistedCount = 0;
@@ -164,6 +204,13 @@ export class SourceSyncRepository {
         });
         persistedCount += 1;
         entries.push({ previous: persisted.previous, current: persisted.current });
+        this.outbox.enqueue({
+          eventKey: `opportunity-sync:${input.sourceCode}:${scopeKey}:${input.organizationId ?? 'global'}:${persisted.current.id}:${persisted.current.updatedAt}`,
+          eventType: 'OPPORTUNITY_SYNCED',
+          organizationId: input.organizationId,
+          radarId: input.radarId,
+          payload: { previous: persisted.previous, current: persisted.current },
+        });
         if (persisted.created) created += 1;
         else updated += 1;
       }
@@ -180,7 +227,7 @@ export class SourceSyncRepository {
             last_success_at = CASE WHEN ? = 'COMPLETED' THEN ? ELSE last_success_at END,
             next_retry_at = NULL,
             updated_at = ?
-        WHERE source_code = ? AND window_start = ? AND window_end = ?
+        WHERE source_code = ? AND flow = 'opportunity' AND scope_key = ? AND window_start = ? AND window_end = ?
       `).run(
         input.nextCursor,
         input.nextCursor === null ? 'COMPLETED' : 'RUNNING',
@@ -192,15 +239,16 @@ export class SourceSyncRepository {
         now,
         now,
         input.sourceCode,
+        scopeKey,
         input.window.dateFrom,
         input.window.dateTo,
       );
-      return { created, updated, entries };
+      return { created, updated, persisted: persistedCount, entries };
     })();
 
     return {
       ...result,
-      checkpoint: this.getCheckpoint(input.sourceCode, input.window) as SourceCheckpoint,
+      checkpoint: this.getCheckpoint(input.sourceCode, input.window, 'opportunity', scopeKey) as SourceCheckpoint,
     };
   }
 
@@ -217,13 +265,16 @@ export class SourceSyncRepository {
   persistMarketBundlePage(input: PersistMarketBundlePageInput): PersistPageResult {
     assertMarketItems(input.sourceCode, input.observations);
     assertMarketItems(input.sourceCode, input.results);
+    const scopeKey = input.scopeKey ?? 'default';
     const result = this.db.transaction(() => {
-      this.ensureCheckpoint(input.sourceCode, input.window, input.cursor);
+      this.ensureCheckpoint(input.sourceCode, 'market', scopeKey, input.window, input.cursor);
       const observations = this.persistMarketObservations(input.observations, input.sourceCode);
       const results = this.persistMarketResults(input.results, input.sourceCode);
       const now = new Date().toISOString();
       this.advanceCheckpoint(
         input.sourceCode,
+        'market',
+        scopeKey,
         input.window,
         input.nextCursor,
         input.observations.length + input.results.length,
@@ -235,12 +286,13 @@ export class SourceSyncRepository {
       return {
         created: observations.created + results.created,
         updated: observations.updated + results.updated,
+        persisted: input.observations.length + input.results.length,
       };
     })();
 
     return {
       ...result,
-      checkpoint: this.getCheckpoint(input.sourceCode, input.window) as SourceCheckpoint,
+      checkpoint: this.getCheckpoint(input.sourceCode, input.window, 'market', scopeKey) as SourceCheckpoint,
     };
   }
 
@@ -462,16 +514,16 @@ export class SourceSyncRepository {
     }));
   }
 
-  getCheckpoint(sourceCode: SourceId, window: SourceWindow): SourceCheckpoint | undefined {
+  getCheckpoint(sourceCode: SourceId, window: SourceWindow, flow: SourceFlow = 'opportunity', scopeKey = 'default'): SourceCheckpoint | undefined {
     const row = this.db.prepare(`
       SELECT * FROM source_checkpoints
-      WHERE source_code = ? AND window_start = ? AND window_end = ?
-    `).get(sourceCode, window.dateFrom, window.dateTo) as CheckpointRow | undefined;
+      WHERE source_code = ? AND flow = ? AND scope_key = ? AND window_start = ? AND window_end = ?
+    `).get(sourceCode, flow, scopeKey, window.dateFrom, window.dateTo) as CheckpointRow | undefined;
     return row ? mapCheckpoint(row) : undefined;
   }
 
-  getResumeCursor(sourceCode: SourceId, window: SourceWindow): string | null {
-    const checkpoint = this.getCheckpoint(sourceCode, window);
+  getResumeCursor(sourceCode: SourceId, window: SourceWindow, flow: SourceFlow = 'opportunity', scopeKey = 'default'): string | null {
+    const checkpoint = this.getCheckpoint(sourceCode, window, flow, scopeKey);
     return checkpoint?.status === 'COMPLETED' ? null : checkpoint?.cursor ?? null;
   }
 
@@ -480,28 +532,30 @@ export class SourceSyncRepository {
     window: SourceWindow,
     errorCategory: string,
     nextRetryAt: string | null = null,
+    flow: SourceFlow = 'opportunity',
+    scopeKey = 'default',
   ): SourceCheckpoint {
     const now = new Date().toISOString();
     this.db.prepare(`
       INSERT INTO source_checkpoints (
-        source_code, window_start, window_end, cursor, status, error_category,
+        source_code, flow, scope_key, window_start, window_end, cursor, status, error_category,
         next_retry_at, created_at, updated_at
-      ) VALUES (?, ?, ?, NULL, 'FAILED', ?, ?, ?, ?)
-      ON CONFLICT(source_code, window_start, window_end) DO UPDATE SET
+      ) VALUES (?, ?, ?, ?, ?, NULL, 'FAILED', ?, ?, ?, ?)
+      ON CONFLICT(source_code, flow, scope_key, window_start, window_end) DO UPDATE SET
         status = 'FAILED', error_category = excluded.error_category,
         next_retry_at = excluded.next_retry_at, updated_at = excluded.updated_at
-    `).run(sourceCode, window.dateFrom, window.dateTo, errorCategory, nextRetryAt, now, now);
-    return this.getCheckpoint(sourceCode, window) as SourceCheckpoint;
+    `).run(sourceCode, flow, scopeKey, window.dateFrom, window.dateTo, errorCategory, nextRetryAt, now, now);
+    return this.getCheckpoint(sourceCode, window, flow, scopeKey) as SourceCheckpoint;
   }
 
-  beginRun(sourceCode: SourceId, window: SourceWindow, cursor: string | null = null): number {
+  beginRun(sourceCode: SourceId, window: SourceWindow, cursor: string | null = null, flow: SourceFlow = 'opportunity', scopeKey = 'default'): number {
     const now = new Date().toISOString();
-    this.ensureCheckpoint(sourceCode, window, cursor);
+    this.ensureCheckpoint(sourceCode, flow, scopeKey, window, cursor);
     const result = this.db.prepare(`
       INSERT INTO source_runs (
-        source_code, window_start, window_end, cursor, status, started_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, 'RUNNING', ?, ?, ?)
-    `).run(sourceCode, window.dateFrom, window.dateTo, cursor, now, now, now);
+        source_code, flow, scope_key, window_start, window_end, cursor, status, started_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 'RUNNING', ?, ?, ?)
+    `).run(sourceCode, flow, scopeKey, window.dateFrom, window.dateTo, cursor, now, now, now);
     return Number(result.lastInsertRowid);
   }
 
@@ -524,20 +578,45 @@ export class SourceSyncRepository {
     `).run(errorCategory, errorMessage.slice(0, 500), now, now, id);
   }
 
-  private ensureCheckpoint(sourceCode: SourceId, window: SourceWindow, cursor: string | null): void {
+  listRuns(options: { sourceCode?: SourceId; flow?: SourceFlow; scopeKey?: string; limit?: number } = {}): SourceRun[] {
+    const conditions: string[] = [];
+    const params: Array<string | number> = [];
+    if (options.sourceCode) {
+      conditions.push('source_code = ?');
+      params.push(options.sourceCode);
+    }
+    if (options.flow) {
+      conditions.push('flow = ?');
+      params.push(options.flow);
+    }
+    if (options.scopeKey) {
+      conditions.push('scope_key = ?');
+      params.push(options.scopeKey);
+    }
+    const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
+    const limit = Math.max(1, Math.floor(options.limit ?? 100));
+    const rows = this.db.prepare(`
+      SELECT * FROM source_runs${where} ORDER BY started_at DESC, id DESC LIMIT ?
+    `).all(...params, limit) as SourceRunRow[];
+    return rows.map(mapSourceRun);
+  }
+
+  private ensureCheckpoint(sourceCode: SourceId, flow: SourceFlow, scopeKey: string, window: SourceWindow, cursor: string | null): void {
     const now = new Date().toISOString();
     this.db.prepare(`
       INSERT INTO source_checkpoints (
-        source_code, window_start, window_end, cursor, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, 'RUNNING', ?, ?)
-      ON CONFLICT(source_code, window_start, window_end) DO UPDATE SET
+        source_code, flow, scope_key, window_start, window_end, cursor, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 'RUNNING', ?, ?)
+      ON CONFLICT(source_code, flow, scope_key, window_start, window_end) DO UPDATE SET
         status = CASE WHEN source_checkpoints.status = 'COMPLETED' THEN 'RUNNING' ELSE source_checkpoints.status END,
         updated_at = excluded.updated_at
-    `).run(sourceCode, window.dateFrom, window.dateTo, cursor, now, now);
+    `).run(sourceCode, flow, scopeKey, window.dateFrom, window.dateTo, cursor, now, now);
   }
 
   private advanceCheckpoint(
     sourceCode: SourceId,
+    flow: SourceFlow,
+    scopeKey: string,
     window: SourceWindow,
     cursor: string | null,
     received: number,
@@ -558,7 +637,7 @@ export class SourceSyncRepository {
           last_success_at = CASE WHEN ? = 'COMPLETED' THEN ? ELSE last_success_at END,
           next_retry_at = NULL,
           updated_at = ?
-      WHERE source_code = ? AND window_start = ? AND window_end = ?
+      WHERE source_code = ? AND flow = ? AND scope_key = ? AND window_start = ? AND window_end = ?
     `).run(
       cursor,
       cursor === null ? 'COMPLETED' : 'RUNNING',
@@ -570,6 +649,8 @@ export class SourceSyncRepository {
       now,
       now,
       sourceCode,
+      flow,
+      scopeKey,
       window.dateFrom,
       window.dateTo,
     );
@@ -579,6 +660,8 @@ export class SourceSyncRepository {
 function mapCheckpoint(row: CheckpointRow): SourceCheckpoint {
   return {
     sourceCode: row.source_code,
+    flow: row.flow,
+    scopeKey: row.scope_key,
     window: { dateFrom: row.window_start, dateTo: row.window_end },
     cursor: row.cursor,
     status: row.status,
@@ -589,6 +672,28 @@ function mapCheckpoint(row: CheckpointRow): SourceCheckpoint {
     errorCategory: row.error_category,
     lastSuccessAt: row.last_success_at,
     nextRetryAt: row.next_retry_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapSourceRun(row: SourceRunRow): SourceRun {
+  return {
+    id: row.id,
+    sourceCode: row.source_code,
+    flow: row.flow,
+    scopeKey: row.scope_key,
+    window: { dateFrom: row.window_start, dateTo: row.window_end },
+    cursor: row.cursor,
+    status: row.status,
+    receivedCount: row.received_count,
+    persistedCount: row.persisted_count,
+    createdCount: row.created_count,
+    updatedCount: row.updated_count,
+    errorCategory: row.error_category,
+    errorMessage: row.error_message,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

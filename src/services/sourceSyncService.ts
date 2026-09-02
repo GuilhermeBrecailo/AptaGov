@@ -29,6 +29,9 @@ export interface SourceSyncServiceOptions {
 export interface SourceSyncRunInput {
   filters: FilterConfig;
   today?: Date;
+  organizationId?: number;
+  radarId?: number | null;
+  scopeKey?: string;
   onEntry?: (entry: SyncEntry) => void | Promise<void>;
   skipSources?: ReadonlySet<SourceId>;
 }
@@ -69,7 +72,7 @@ export class SourceSyncService {
   }
 
   async run(input: SourceSyncRunInput): Promise<SourceSyncRunResult> {
-    const queries = buildQueries(input.filters, input.today ?? new Date());
+    const queries = buildQueries(input.filters, input.today ?? new Date(), input.scopeKey ?? 'default', input.organizationId, input.radarId);
     const clients = this.options.clients.filter((client) => !input.skipSources?.has(client.id));
     const sourceResults = await Promise.all(clients.map((client) => this.runSource(client, queries, input.onEntry)));
     const entries = sourceResults.flatMap((result) => result.entries);
@@ -88,10 +91,11 @@ export class SourceSyncService {
     };
   }
 
-  async healthCheck(filters: FilterConfig, today = new Date()): Promise<boolean> {
-    const query = buildQueries(filters, today)[0];
+  async healthCheck(filters: FilterConfig, today = new Date(), source?: SourceId): Promise<boolean> {
+    const query = buildQueries(filters, today, 'health-check')[0];
     if (!query) return false;
-    const checks = await Promise.all(this.options.clients.map(async (client) => {
+    const clients = source ? this.options.clients.filter((client) => client.id === source) : this.options.clients;
+    const checks = await Promise.all(clients.map(async (client) => {
       try {
         await this.breaker(client.id).execute(() => client.listOpportunities({ ...query, cursor: null }));
         return true;
@@ -99,7 +103,7 @@ export class SourceSyncService {
         return false;
       }
     }));
-    return checks.length > 0 && checks.every(Boolean);
+    return clients.length > 0 && checks.every(Boolean);
   }
 
   private async runSource(
@@ -181,7 +185,7 @@ function addResult(target: SourceSyncSourceResult, result: SourceSyncResult): vo
   target.updated += result.updated;
 }
 
-function buildQueries(filters: FilterConfig, today: Date): SourceQuery[] {
+function buildQueries(filters: FilterConfig, today: Date, baseScopeKey = 'default', organizationId?: number, radarId?: number | null): SourceQuery[] {
   const dateTo = formatDate(today);
   const startDate = new Date(today);
   startDate.setUTCDate(startDate.getUTCDate() - filters.lookbackDays);
@@ -189,6 +193,7 @@ function buildQueries(filters: FilterConfig, today: Date): SourceQuery[] {
   const states = filters.states.length > 0 ? filters.states : [undefined];
   const cities = filters.citiesIbge.length > 0 ? filters.citiesIbge : [undefined];
   const modalities = filters.modalities.length > 0 ? filters.modalities : [undefined];
+  const singleQuery = states.length === 1 && cities.length === 1 && modalities.length === 1;
   return states.flatMap((state) => cities.flatMap((cityIbge) => modalities.map((modality) => ({
     dateFrom,
     dateTo,
@@ -198,6 +203,10 @@ function buildQueries(filters: FilterConfig, today: Date): SourceQuery[] {
       citiesIbge: cityIbge ? [cityIbge] : [],
       modalities: modality ? [modality] : [],
     },
+    flow: 'opportunity' as const,
+    scopeKey: singleQuery ? baseScopeKey : `${baseScopeKey}:${state ?? '-'}:${cityIbge ?? '-'}:${modality ?? '-'}`,
+    organizationId,
+    radarId,
   }))));
 }
 

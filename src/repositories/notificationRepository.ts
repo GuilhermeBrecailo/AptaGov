@@ -78,15 +78,18 @@ export class NotificationRepository {
     return this.enqueue(input);
   }
 
-  listPending(limit = 100): NotificationDelivery[] {
+  listPending(limit = 100, organizationId?: number): NotificationDelivery[] {
+    const scope = organizationId === undefined ? '' : ' AND d.organization_id = ?';
+    const params = organizationId === undefined ? [limit] : [organizationId, limit];
     const rows = this.db.prepare(`
       SELECT d.*
       FROM notification_deliveries d
       INNER JOIN notification_settings s ON s.organization_id = d.organization_id AND s.enabled = 1
       WHERE d.status IN ('PENDING', 'FAILED')
+        ${scope}
       ORDER BY d.created_at ASC
       LIMIT ?
-    `).all(limit) as NotificationDeliveryRow[];
+    `).all(...params) as NotificationDeliveryRow[];
     return rows.map(mapDelivery);
   }
 

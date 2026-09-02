@@ -124,9 +124,9 @@ export class NotificationService {
     }, 0);
   }
 
-  async deliverPending(sender: NotificationSender): Promise<number> {
+  async deliverPending(sender: NotificationSender, organizationId?: number): Promise<number> {
     let delivered = 0;
-    for (const delivery of this.notifications.listPending()) {
+    for (const delivery of this.notifications.listPending(100, organizationId)) {
       try {
         const result = await sender.send({ to: delivery.recipient, subject: delivery.subject, body: delivery.body });
         this.notifications.markSent(delivery.id, result.providerId);

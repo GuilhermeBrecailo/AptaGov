@@ -204,7 +204,9 @@ export async function syncSourceOpportunities(
   hooks: SourceSyncHooks = {},
 ): Promise<SourceSyncResult> {
   const window: SourceWindow = { dateFrom: query.dateFrom, dateTo: query.dateTo };
-  let cursor = repository.getResumeCursor(client.id, window);
+  const scopeKey = query.scopeKey ?? 'default';
+  let cursor = repository.getResumeCursor(client.id, window, 'opportunity', scopeKey);
+  const runId = repository.beginRun(client.id, window, cursor, 'opportunity', scopeKey);
   const result: SourceSyncResult = { received: 0, persisted: 0, created: 0, updated: 0, entries: [] };
 
   try {
@@ -215,9 +217,12 @@ export async function syncSourceOpportunities(
         cursor,
         nextCursor: page.nextCursor,
         items: page.items,
+        scopeKey,
+        organizationId: query.organizationId,
+        radarId: query.radarId,
       });
       result.received += page.items.length;
-      result.persisted += page.items.length;
+      result.persisted += persisted.persisted;
       result.created += persisted.created;
       result.updated += persisted.updated;
       for (const entry of persisted.entries ?? []) {
@@ -226,9 +231,16 @@ export async function syncSourceOpportunities(
       }
       cursor = page.nextCursor;
     }
+    repository.completeRun(runId, {
+      receivedCount: result.received,
+      persistedCount: result.persisted,
+      createdCount: result.created,
+      updatedCount: result.updated,
+    });
     return result;
   } catch (error) {
-    repository.recordFailure(client.id, window, sourceErrorCategory(error));
+    repository.recordFailure(client.id, window, sourceErrorCategory(error), null, 'opportunity', scopeKey);
+    repository.failRun(runId, sourceErrorCategory(error), error instanceof Error ? error.message : String(error));
     throw error;
   }
 }
@@ -244,7 +256,9 @@ export async function syncSourceMarket(
   repository: SourceSyncRepository,
 ): Promise<SourceMarketSyncResult> {
   const window: SourceWindow = { dateFrom: query.dateFrom, dateTo: query.dateTo };
-  let cursor = repository.getResumeCursor(client.id, window);
+  const scopeKey = query.scopeKey ?? 'default';
+  let cursor = repository.getResumeCursor(client.id, window, 'market', scopeKey);
+  const runId = repository.beginRun(client.id, window, cursor, 'market', scopeKey);
   const result: SourceMarketSyncResult = {
     received: 0,
     persisted: 0,
@@ -264,18 +278,26 @@ export async function syncSourceMarket(
         nextCursor: page.nextCursor,
         observations: page.items,
         results: page.results,
+        scopeKey,
       });
       result.observationsReceived += page.items.length;
       result.resultsReceived += page.results.length;
       result.received += page.items.length + page.results.length;
-      result.persisted += page.items.length + page.results.length;
+      result.persisted += persisted.persisted;
       result.created += persisted.created;
       result.updated += persisted.updated;
       cursor = page.nextCursor;
     }
+    repository.completeRun(runId, {
+      receivedCount: result.received,
+      persistedCount: result.persisted,
+      createdCount: result.created,
+      updatedCount: result.updated,
+    });
     return result;
   } catch (error) {
-    repository.recordFailure(client.id, window, sourceErrorCategory(error));
+    repository.recordFailure(client.id, window, sourceErrorCategory(error), null, 'market', scopeKey);
+    repository.failRun(runId, sourceErrorCategory(error), error instanceof Error ? error.message : String(error));
     throw error;
   }
 }

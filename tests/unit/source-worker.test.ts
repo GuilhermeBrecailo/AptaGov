@@ -131,7 +131,7 @@ describe('worker de fontes oficiais', () => {
     const db = createTestDatabase();
     const repository = new JobRepository(db);
     const first = repository.create('source_sync', { source: 'PNCP', window: '2026-08-31' }, 'source:PNCP:2026-08-31');
-    repository.markRunning(first);
+    repository.markRunning(first, 'crashed-runtime', -1);
 
     const recovered = repository.recoverInterrupted();
     const reused = repository.create('source_sync', { source: 'PNCP', window: '2026-08-31' }, 'source:PNCP:2026-08-31');

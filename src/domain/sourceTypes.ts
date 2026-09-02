@@ -2,6 +2,7 @@ import type { FilterConfig, OpportunityInput } from './types';
 
 export type SourceId = 'PNCP' | 'OPEN_DATA' | 'BEC/SP';
 export type CanonicalSource = SourceId;
+export type SourceFlow = 'opportunity' | 'market';
 
 export const SOURCE_LABELS: Readonly<Record<SourceId, string>> = {
   PNCP: 'PNCP',
@@ -21,6 +22,10 @@ export interface SourceWindow {
 export interface SourceQuery extends SourceWindow {
   filters: FilterConfig;
   cursor?: string | null;
+  flow?: SourceFlow;
+  scopeKey?: string;
+  organizationId?: number | null;
+  radarId?: number | null;
 }
 
 export interface SourcePage<T> {

@@ -7,7 +7,7 @@ describe('retomada do worker', () => {
     const db = createTestDatabase();
     const repository = new JobRepository(db);
     const jobId = repository.create('sync');
-    repository.markRunning(jobId);
+    repository.markRunning(jobId, 'crashed-runtime', -1);
 
     repository.recoverInterrupted();
 

@@ -229,20 +229,38 @@ export class PushNotificationRepository {
     ).changes, 0))();
   }
 
-  listPending(limit = 100): PushDelivery[] {
+  listPending(limit = 100, organizationId?: number): PushDelivery[] {
+    const scope = organizationId === undefined ? '' : `
+        AND EXISTS (
+          SELECT 1 FROM organization_memberships scoped_membership
+          WHERE scoped_membership.user_id = ps.user_id AND scoped_membership.organization_id = ?
+        )`;
+    const params = organizationId === undefined ? [limit] : [organizationId, limit];
     const rows = this.db.prepare(`
       SELECT d.*, ps.endpoint, ps.p256dh, ps.auth, ps.expiration_time
       FROM push_deliveries d
       INNER JOIN push_subscriptions ps ON ps.id = d.subscription_id
       WHERE d.status IN ('PENDING', 'FAILED')
+        ${scope}
       ORDER BY d.created_at ASC
       LIMIT ?
-    `).all(limit) as PushDeliveryRow[];
+    `).all(...params) as PushDeliveryRow[];
     return rows.map(mapDelivery);
   }
 
-  pendingCount(): number {
-    return (this.db.prepare("SELECT COUNT(*) AS count FROM push_deliveries WHERE status IN ('PENDING', 'FAILED')").get() as { count: number }).count;
+  pendingCount(organizationId?: number): number {
+    if (organizationId === undefined) {
+      return (this.db.prepare("SELECT COUNT(*) AS count FROM push_deliveries WHERE status IN ('PENDING', 'FAILED')").get() as { count: number }).count;
+    }
+    return (this.db.prepare(`
+      SELECT COUNT(*) AS count FROM push_deliveries d
+      INNER JOIN push_subscriptions ps ON ps.id = d.subscription_id
+      WHERE d.status IN ('PENDING', 'FAILED')
+        AND EXISTS (
+          SELECT 1 FROM organization_memberships m
+          WHERE m.user_id = ps.user_id AND m.organization_id = ?
+        )
+    `).get(organizationId) as { count: number }).count;
   }
 
   markSent(id: number, providerId?: string): void {

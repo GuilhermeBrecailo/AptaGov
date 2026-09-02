@@ -9,6 +9,11 @@ import { OpportunityChangeService } from './opportunityChangeService';
 import { PushNotificationService } from './pushNotificationService';
 import type { SyncEntry } from './syncService';
 
+export interface OperationalSyncScope {
+  organizationId?: number;
+  organizationIds?: ReadonlySet<number>;
+}
+
 export class OperationalSyncService {
   private readonly opportunities: OpportunityRepository;
   private readonly changes: OpportunityChangeService;
@@ -26,12 +31,15 @@ export class OperationalSyncService {
     this.pushNotifications = new PushNotificationService(db);
   }
 
-  processEntry(entry: SyncEntry): void {
+  processEntry(entry: SyncEntry, scope: OperationalSyncScope = {}): void {
     const changes = this.changes.detectAndRecord(entry.previous, entry.current);
     const opportunity = this.opportunities.findById(entry.current.opportunityId);
     if (!opportunity) return;
 
-    for (const organizationId of this.opportunities.listOperationalOrganizationIds(opportunity.id)) {
+    const operationalOrganizations = this.opportunities.listOperationalOrganizationIds(opportunity.id)
+      .filter((organizationId) => scope.organizationId === undefined || organizationId === scope.organizationId)
+      .filter((organizationId) => !scope.organizationIds || scope.organizationIds.has(organizationId));
+    for (const organizationId of operationalOrganizations) {
       const preferences = this.alertPreferences.find(organizationId);
       this.agenda.scheduleOfficialReminders(organizationId, entry.previous, entry.current);
       for (const change of changes) {

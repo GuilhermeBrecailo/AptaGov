@@ -15,7 +15,7 @@ import { AgendaService } from './services/agendaService';
 import { classifyOpportunities, classifyOrganizationOpportunities } from './services/scoring/classificationService';
 import { OperationalSyncService } from './services/operationalSyncService';
 import { SourceSyncService, type SourceSyncRunResult, type SourceSyncSourceResult } from './services/sourceSyncService';
-import { MarketRefreshService, type MarketRefreshResult } from './services/marketRefreshService';
+import { MarketRefreshService, type MarketRefreshResult, type MarketRefreshSourceResult } from './services/marketRefreshService';
 import { shouldRunSync, type SyncMode } from './services/syncPolicy';
 import { selectRadarsForNotifications, selectRadarsForRun } from './services/savedSearchService';
 import { normalizeOpportunitySnapshot } from './services/opportunityChangeService';
@@ -31,7 +31,10 @@ import { OrganizationSyncSettingsRepository } from './repositories/organizationS
 import { SavedSearchRepository } from './repositories/savedSearchRepository';
 import { SourceSyncRepository } from './repositories/sourceSyncRepository';
 import { SystemStateRepository } from './repositories/systemStateRepository';
-import type { WorkerStage } from './repositories/systemStateRepository';
+import type { PauseSelector, SystemPauseEntry, WorkerStage } from './repositories/systemStateRepository';
+import { OperationalOutboxRepository, type OperationalOutboxEvent } from './repositories/operationalOutboxRepository';
+import { WorkerMetricsRepository } from './repositories/workerMetricsRepository';
+import type { SyncEntry } from './services/syncService';
 
 export interface WorkerCycleMetrics {
   startedAt: string;
@@ -40,8 +43,12 @@ export interface WorkerCycleMetrics {
   jobsCreated: number;
   jobsCompleted: number;
   jobsFailed: number;
-  sourceResults: Array<Pick<SourceSyncSourceResult, 'source' | 'status' | 'received' | 'created' | 'updated' | 'errorCategory'>>;
-  marketRefresh?: Pick<MarketRefreshResult, 'received' | 'created' | 'updated' | 'observationsReceived' | 'resultsReceived'>;
+  sourceResults: Array<Pick<SourceSyncSourceResult, 'source' | 'status' | 'received' | 'persisted' | 'created' | 'updated' | 'errorCategory'>>;
+  marketRefresh?: Pick<MarketRefreshResult, 'received' | 'created' | 'updated' | 'observationsReceived' | 'resultsReceived'> & {
+    sourceResults: Array<Pick<MarketRefreshSourceResult, 'source' | 'status' | 'received' | 'persisted' | 'created' | 'updated' | 'observationsReceived' | 'resultsReceived' | 'errorCategory'>>;
+  };
+  outboxProcessed: number;
+  outboxFailed: number;
   agendaPrepared: number;
   notificationsQueued: number;
   notificationsDelivered: number;
@@ -71,6 +78,8 @@ export interface WorkerRuntimeDependencies {
   backup?: typeof createDatabaseBackup;
   now?: () => Date;
   healthCheck?: () => Promise<boolean>;
+  healthChecks?: Partial<Record<WorkerStage, () => boolean | Promise<boolean>>>;
+  workerId?: string;
 }
 
 interface SourceJobPayload {
@@ -78,6 +87,7 @@ interface SourceJobPayload {
   radarId: number | null;
   filters: FilterConfig;
   today: string;
+  scopeKey?: string;
 }
 
 interface AgendaJobPayload {
@@ -88,6 +98,8 @@ interface MarketJobPayload {
   filters: FilterConfig;
   today: string;
   lookbackDays: number;
+  organizationId?: number;
+  radarId?: number | null;
 }
 
 interface SourceScope {
@@ -125,6 +137,10 @@ export class WorkerRuntime {
   private readonly now: () => Date;
   private readonly backup: typeof createDatabaseBackup;
   private readonly healthCheckOverride?: () => Promise<boolean>;
+  private readonly healthChecks: Partial<Record<WorkerStage, () => boolean | Promise<boolean>>>;
+  private readonly workerId: string;
+  private readonly outbox: OperationalOutboxRepository;
+  private readonly metricsRepository: WorkerMetricsRepository;
   private lastMetrics: WorkerCycleMetrics | null = null;
 
   constructor(
@@ -137,6 +153,8 @@ export class WorkerRuntime {
     this.now = dependencies.now ?? (() => new Date());
     this.backup = dependencies.backup ?? createDatabaseBackup;
     this.healthCheckOverride = dependencies.healthCheck;
+    this.healthChecks = dependencies.healthChecks ?? {};
+    this.workerId = dependencies.workerId ?? `worker:${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
     this.opportunities = new OpportunityRepository(this.db);
     this.jobs = new JobRepository(this.db);
     this.systemState = new SystemStateRepository(this.db);
@@ -149,6 +167,8 @@ export class WorkerRuntime {
     this.operationalSync = new OperationalSyncService(this.db);
     this.agenda = new AgendaService(this.db);
     this.checklists = new ChecklistService(new ChecklistRepository(this.db));
+    this.outbox = new OperationalOutboxRepository(this.db);
+    this.metricsRepository = new WorkerMetricsRepository(this.db);
     const sourceRepository = new SourceSyncRepository(this.db, this.opportunities);
     const clients = dependencies.sourceClients ?? createDefaultSourceRegistry(env);
     this.sourceSyncService = dependencies.sourceSyncService ?? new SourceSyncService({ clients, repository: sourceRepository });
@@ -158,7 +178,7 @@ export class WorkerRuntime {
   async runCycle(options: WorkerCycleOptions = {}): Promise<WorkerCycleResult> {
     const cycleStarted = this.now();
     const cycleStartedAt = cycleStarted.toISOString();
-    const recovered = this.jobs.recoverInterrupted();
+    const recovered = this.jobs.recoverInterrupted(this.now(), this.env.workerLeaseMs);
     const currentPause = this.systemState.status();
     const legacyJobs = this.jobs.list('PENDING').filter((job) => job.type === 'sync_and_classify');
     const metrics = newMetrics(cycleStartedAt, recovered.length);
@@ -166,18 +186,32 @@ export class WorkerRuntime {
     const enabledOrganizationIds = this.syncSettings.listEnabledOrganizationIds();
     const canRunAutomatic = shouldRunSync(mode, enabledOrganizationIds.length > 0);
 
+    if (!canRunAutomatic) {
+      for (const legacyJob of legacyJobs) {
+        this.jobs.markCompleted(legacyJob.id);
+      }
+      metrics.jobsCompleted += legacyJobs.length;
+    }
+
     if (isGlobalPause(currentPause)) {
       metrics.finishedAt = this.now().toISOString();
       metrics.pauseReason = currentPause.reason;
-      this.lastMetrics = metrics;
+      this.recordMetrics(metrics, mode);
       return { paused: true, reason: currentPause.reason, synced: 0, classified: 0, notified: 0, metrics };
     }
 
-    const pendingDurableJobs = this.jobs.list('PENDING').filter(isDurableJob);
+    const pendingDurableJobs = this.jobs.list(
+      'PENDING',
+      mode === 'manual' && options.organizationId !== undefined
+        ? { organizationId: options.organizationId, ...(options.radarId !== undefined ? { radarId: options.radarId } : {}) }
+        : undefined,
+    ).filter(isDurableJob);
     if (!canRunAutomatic && pendingDurableJobs.length === 0) {
       metrics.finishedAt = this.now().toISOString();
-      this.lastMetrics = metrics;
-      return { paused: false, synced: 0, classified: 0, notified: 0, metrics };
+      const paused = this.systemState.status().paused;
+      metrics.pauseReason = this.systemState.status().reason;
+      this.recordMetrics(metrics, mode);
+      return { paused, reason: metrics.pauseReason, synced: 0, classified: 0, notified: 0, metrics };
     }
 
     const defaultFilters = loadFilters();
@@ -185,17 +219,17 @@ export class WorkerRuntime {
       .filter((organization) => options.organizationId === undefined || organization.id === options.organizationId)
       .filter((organization) => mode === 'manual' || enabledOrganizationIds.includes(organization.id));
     const scopes = this.buildScopes(organizations, mode, options, defaultFilters);
-    const sourcePause = sourcePauseState(currentPause);
-    const agendaPaused = isStagePaused(currentPause, 'agenda');
-    const marketPaused = isStagePaused(currentPause, 'market');
-    const notificationsPaused = isStagePaused(currentPause, 'notifications');
+    const sourcePause = sourcePauseState(this.systemState);
+    const agendaPaused = hasUnscopedPause(this.systemState, 'agenda');
+    const marketPaused = hasUnscopedPause(this.systemState, 'market');
+    const notificationsPaused = hasUnscopedPause(this.systemState, 'notifications');
     const aggregate: SyncAggregate = { received: 0, created: 0, updated: 0, entries: [] };
     let classified = 0;
     let notified = 0;
     let phase: WorkerStage = 'source';
 
     let sourceJobs = pendingDurableJobs.filter((job) => job.type === 'source_sync');
-    if (sourceJobs.length === 0 && !sourcePause.blockAll) {
+    if (sourceJobs.length === 0 && canRunAutomatic && !sourcePause.blockAll) {
       sourceJobs = [];
       for (const scope of scopes) {
         const payload: SourceJobPayload = {
@@ -203,26 +237,32 @@ export class WorkerRuntime {
           radarId: scope.radarId,
           filters: scope.filters,
           today: cycleStartedAt,
+          scopeKey: sourceScopeKey(scope.organizationId, scope.radarId),
         };
-        const jobId = this.jobs.create(
+        const reservation = this.jobs.reserve(
           'source_sync',
           payload as unknown as Record<string, unknown>,
-          `source_sync:${mode}:${scope.organizationId}:${scope.radarId ?? 'default'}:${cycleStartedAt}`,
+          `source_sync:${mode}:${scope.organizationId}:${scope.radarId ?? 'default'}:${cycleKey(cycleStarted, mode, scope.organizationId, scope.radarId, this.env.syncIntervalMinutes)}`,
+          { organizationId: scope.organizationId, radarId: scope.radarId },
         );
-        metrics.jobsCreated += 1;
-        const job = this.jobs.find(jobId);
+        if (reservation.created) metrics.jobsCreated += 1;
+        const job = this.jobs.find(reservation.id);
         if (job) sourceJobs.push(job);
       }
     }
 
     for (const job of sourceJobs) {
       if (sourcePause.blockAll) break;
-      const result = await this.executeSourceJob(job, sourcePause.source, metrics);
+      const result = await this.executeSourceJob(job, sourcePause.sources, metrics, mode, options);
       aggregate.received += result.received;
       aggregate.created += result.created;
       aggregate.updated += result.updated;
       aggregate.entries.push(...result.entries);
     }
+
+    const outboxResult = this.processOperationalOutbox(mode === 'manual' ? options.organizationId : undefined, metrics);
+    metrics.outboxProcessed = outboxResult.processed;
+    metrics.outboxFailed = outboxResult.failed;
 
     try {
       const globalClassification = await classifyOpportunities(this.opportunities, defaultFilters);
@@ -242,13 +282,14 @@ export class WorkerRuntime {
         if (agendaJobs.length === 0) {
           agendaJobs = [];
           for (const organizationId of agendaOrganizationIds) {
-            const jobId = this.jobs.create(
+            const reservation = this.jobs.reserve(
               'agenda_preparation',
               { organizationId } satisfies AgendaJobPayload as unknown as Record<string, unknown>,
-              `agenda_preparation:${organizationId}:${cycleStartedAt}`,
+              `agenda_preparation:${organizationId}:${cycleKey(cycleStarted, mode, organizationId, null, this.env.syncIntervalMinutes)}`,
+              { organizationId },
             );
-            metrics.jobsCreated += 1;
-            const job = this.jobs.find(jobId);
+            if (reservation.created) metrics.jobsCreated += 1;
+            const job = this.jobs.find(reservation.id);
             if (job) agendaJobs.push(job);
           }
         }
@@ -260,17 +301,20 @@ export class WorkerRuntime {
         let marketJobs = pendingDurableJobs.filter((job) => job.type === 'market_refresh');
         if (marketJobs.length === 0) {
           marketJobs = [];
-          const marketJobId = this.jobs.create(
+          const marketOrganizationId = mode === 'manual' ? options.organizationId : undefined;
+          const reservation = this.jobs.reserve(
             'market_refresh',
             {
               filters: defaultFilters,
               today: cycleStartedAt,
               lookbackDays: this.env.marketLookbackDays,
+              ...(marketOrganizationId === undefined ? {} : { organizationId: marketOrganizationId, radarId: options.radarId ?? null }),
             } satisfies MarketJobPayload as unknown as Record<string, unknown>,
-            `market_refresh:${cycleStartedAt}`,
+            `market_refresh:${mode}:${marketOrganizationId ?? 'global'}:${options.radarId ?? 'all'}:${cycleKey(cycleStarted, mode, marketOrganizationId, options.radarId ?? null, this.env.syncIntervalMinutes)}`,
+            { organizationId: marketOrganizationId ?? null, radarId: options.radarId ?? null },
           );
-          metrics.jobsCreated += 1;
-          const marketJob = this.jobs.find(marketJobId);
+          if (reservation.created) metrics.jobsCreated += 1;
+          const marketJob = this.jobs.find(reservation.id);
           if (marketJob) marketJobs.push(marketJob);
         }
         for (const job of marketJobs) {
@@ -294,7 +338,7 @@ export class WorkerRuntime {
       }
 
       phase = 'backup';
-      if (this.env.databaseUrl !== ':memory:') {
+      if (this.env.databaseUrl !== ':memory:' && !hasUnscopedPause(this.systemState, 'backup')) {
         try {
           metrics.backupPath = this.backup(this.db, this.env.databaseUrl);
         } catch (error) {
@@ -302,41 +346,75 @@ export class WorkerRuntime {
         }
       }
 
-      if (!this.systemState.status().paused) {
-        for (const legacyJob of legacyJobs) {
-          this.jobs.markCompleted(legacyJob.id);
-          metrics.jobsCompleted += 1;
-        }
-      }
-
       metrics.agendaPrepared = agendaPrepared;
       metrics.finishedAt = this.now().toISOString();
       metrics.pauseReason = this.systemState.status().reason;
-      this.lastMetrics = metrics;
+      this.recordMetrics(metrics, mode);
       logger.info({ metrics, sync: aggregate }, 'Worker cycle completed');
-      return { paused: false, reason: metrics.pauseReason, synced: aggregate.received, classified, notified, metrics };
+      const paused = this.systemState.status().paused;
+      return { paused, reason: metrics.pauseReason, synced: aggregate.received, classified, notified, metrics };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Falha desconhecida no worker';
       this.pauseStage(phase, readablePhaseReason(phase), error);
       metrics.finishedAt = this.now().toISOString();
       metrics.pauseReason = this.systemState.status().reason ?? message;
-      this.lastMetrics = metrics;
+      this.recordMetrics(metrics, mode);
       logger.error({ phase, error: message }, 'Worker stage paused after error');
       throw error;
     }
   }
 
   async resumeAfterHealthCheck(): Promise<boolean> {
-    const healthy = this.healthCheckOverride
-      ? await this.healthCheckOverride()
-      : await this.sourceSyncService.healthCheck(loadFilters(), this.now());
-    if (!healthy) return false;
-    this.systemState.resume();
-    return true;
+    const current = this.systemState.status();
+    if (!current.paused) return true;
+    if (current.pauses?.length === 0 || !current.pauses) {
+      const healthy = this.healthCheckOverride ? await this.healthCheckOverride() : true;
+      if (!healthy) return false;
+      this.systemState.resume();
+      return true;
+    }
+    let allHealthy = true;
+    for (const pause of current.pauses) {
+      const healthy = await this.healthCheckFor(pause);
+      if (healthy) this.systemState.resume({ stage: pause.stage, source: pause.source, channel: pause.channel });
+      else allHealthy = false;
+    }
+    return allHealthy;
   }
 
   health(): WorkerCycleMetrics | null {
-    return this.lastMetrics;
+    if (this.lastMetrics) return this.lastMetrics;
+    return this.metricsRepository.latest<WorkerCycleMetrics>()?.metrics ?? null;
+  }
+
+  private recordMetrics(metrics: WorkerCycleMetrics, mode: SyncMode): void {
+    this.lastMetrics = metrics;
+    this.metricsRepository.save(mode, metrics, this.systemState.status().paused);
+  }
+
+  private async healthCheckFor(pause: SystemPauseEntry): Promise<boolean> {
+    const custom = this.healthChecks[pause.stage];
+    if (custom) return Boolean(await custom());
+    if (this.healthCheckOverride) return this.healthCheckOverride();
+    if (pause.stage === 'source') return this.sourceSyncService.healthCheck(loadFilters(), this.now(), sourceIdFrom(pause.source));
+    if (pause.stage === 'market') return this.marketRefreshService.healthCheck(loadFilters(), this.now(), sourceIdFrom(pause.source));
+    if (pause.stage === 'notifications') return this.notificationChannelConfigured(pause.channel);
+    if (pause.stage === 'backup') return this.env.databaseUrl === ':memory:' || this.databaseHealthy();
+    return this.databaseHealthy();
+  }
+
+  private notificationChannelConfigured(channel?: string): boolean {
+    if (channel === 'email') return Boolean(this.env.resendApiKey && this.env.notificationEmailFrom);
+    if (channel === 'push') return this.pushNotifications.isConfigured(this.env.vapidSubject, this.env.vapidPublicKey, this.env.vapidPrivateKey);
+    return true;
+  }
+
+  private databaseHealthy(): boolean {
+    try {
+      return this.db.prepare('PRAGMA integrity_check').get() !== undefined;
+    } catch {
+      return false;
+    }
   }
 
   automaticSyncEnabled(): boolean {
@@ -360,23 +438,40 @@ export class WorkerRuntime {
     });
   }
 
-  private async executeSourceJob(job: JobRecord, pausedSource: SourceId | undefined, metrics: WorkerCycleMetrics): Promise<SyncAggregate> {
+  private async executeSourceJob(
+    job: JobRecord,
+    pausedSources: ReadonlySet<SourceId>,
+    metrics: WorkerCycleMetrics,
+    mode: SyncMode,
+    options: WorkerCycleOptions,
+  ): Promise<SyncAggregate> {
     const payload = sourcePayload(job.checkpoint);
     if (!payload) {
       this.jobs.markFailed(job.id, 'Payload de sincronização inválido');
       metrics.jobsFailed += 1;
       return { received: 0, created: 0, updated: 0, entries: [] };
     }
-    if (!this.jobs.claim(job.id) && this.jobs.find(job.id)?.status !== 'RUNNING') return { received: 0, created: 0, updated: 0, entries: [] };
+    if (!jobInScope(job, mode, options, payload)) return { received: 0, created: 0, updated: 0, entries: [] };
+    if (payload.radarId !== null && !this.savedSearches.find(payload.organizationId, payload.radarId)) {
+      this.jobs.markFailed(job.id, 'Radar da sincronização não existe');
+      metrics.jobsFailed += 1;
+      return { received: 0, created: 0, updated: 0, entries: [] };
+    }
+    const owner = this.workerId;
+    if (!this.jobs.claim(job.id, owner, this.env.workerLeaseMs, { organizationId: payload.organizationId, radarId: payload.radarId })) {
+      return { received: 0, created: 0, updated: 0, entries: [] };
+    }
     try {
       const result = await this.sourceSyncService.run({
         filters: payload.filters,
         today: new Date(payload.today),
-        skipSources: pausedSource ? new Set([pausedSource]) : undefined,
-        onEntry: (entry) => this.operationalSync.processEntry(entry),
+        organizationId: payload.organizationId,
+        radarId: payload.radarId,
+        scopeKey: payload.scopeKey ?? sourceScopeKey(payload.organizationId, payload.radarId),
+        skipSources: pausedSources.size > 0 ? pausedSources : undefined,
       });
-      this.jobs.updateCheckpoint(job.id, { sourceResults: result.sourceResults.map(sourceMetric) });
-      this.jobs.markCompleted(job.id);
+      this.jobs.updateCheckpoint(job.id, { sourceResults: result.sourceResults.map(sourceMetric) }, owner);
+      this.jobs.markCompleted(job.id, owner);
       metrics.jobsCompleted += 1;
       for (const source of result.sourceResults) {
         metrics.sourceResults.push(sourceMetric(source));
@@ -388,11 +483,33 @@ export class WorkerRuntime {
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Falha desconhecida na fonte oficial';
-      this.jobs.markFailed(job.id, message);
+      this.jobs.markFailed(job.id, message, owner);
       metrics.jobsFailed += 1;
       this.pauseStage('source', `Sincronização oficial interrompida: ${message}`, error);
       return { received: 0, created: 0, updated: 0, entries: [] };
     }
+  }
+
+  private processOperationalOutbox(organizationId: number | undefined, metrics: WorkerCycleMetrics): { processed: number; failed: number } {
+    let processed = 0;
+    let failed = 0;
+    while (true) {
+      const event = this.outbox.claimNext(this.workerId, this.env.workerLeaseMs, organizationId);
+      if (!event) break;
+      try {
+        const entry = outboxEntry(event);
+        if (!entry) throw new Error('Evento operacional inválido');
+        this.operationalSync.processEntry(entry, event.organizationId === null ? {} : { organizationId: event.organizationId });
+        this.outbox.complete(event.id, this.workerId);
+        processed += 1;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Falha no efeito operacional';
+        this.outbox.fail(event.id, message, this.workerId);
+        this.pauseStage('agenda', 'Efeito operacional pendente de reprocessamento', error);
+        failed += 1;
+      }
+    }
+    return { processed, failed };
   }
 
   private executeAgendaJob(job: JobRecord, metrics: WorkerCycleMetrics): number {
@@ -402,7 +519,8 @@ export class WorkerRuntime {
       metrics.jobsFailed += 1;
       return 0;
     }
-    if (!this.jobs.claim(job.id) && this.jobs.find(job.id)?.status !== 'RUNNING') return 0;
+    const owner = this.workerId;
+    if (!this.jobs.claim(job.id, owner, this.env.workerLeaseMs, { organizationId: payload.organizationId })) return 0;
     try {
       let prepared = 0;
       for (const opportunityId of this.opportunities.listKanbanOpportunityIds(payload.organizationId)) {
@@ -414,11 +532,11 @@ export class WorkerRuntime {
         prepared += 1;
       }
       this.jobs.updateCheckpoint(job.id, { prepared });
-      this.jobs.markCompleted(job.id);
+      this.jobs.markCompleted(job.id, owner);
       metrics.jobsCompleted += 1;
       return prepared;
     } catch (error) {
-      this.jobs.markFailed(job.id, error instanceof Error ? error.message : 'Falha desconhecida na agenda');
+      this.jobs.markFailed(job.id, error instanceof Error ? error.message : 'Falha desconhecida na agenda', owner);
       metrics.jobsFailed += 1;
       this.pauseStage('agenda', 'Preparação de agenda interrompida', error);
       return 0;
@@ -432,18 +550,28 @@ export class WorkerRuntime {
       metrics.jobsFailed += 1;
       return undefined;
     }
-    if (!this.jobs.claim(job.id) && this.jobs.find(job.id)?.status !== 'RUNNING') return undefined;
+    const owner = this.workerId;
+    if (!this.jobs.claim(job.id, owner, this.env.workerLeaseMs, { organizationId: payload.organizationId, radarId: payload.radarId })) return undefined;
     try {
-      const result = await this.marketRefreshService.run({ filters: payload.filters, today: new Date(payload.today), lookbackDays: payload.lookbackDays });
-      this.jobs.updateCheckpoint(job.id, { sourceResults: result.sourceResults });
-      this.jobs.markCompleted(job.id);
+      const pausedSources = pausedSourceIds(this.systemState, 'market');
+      const result = await this.marketRefreshService.run({
+        filters: payload.filters,
+        today: new Date(payload.today),
+        lookbackDays: payload.lookbackDays,
+        organizationId: payload.organizationId,
+        radarId: payload.radarId,
+        scopeKey: marketScopeKey(payload.organizationId, payload.radarId),
+        skipSources: pausedSources.size > 0 ? pausedSources : undefined,
+      });
+      this.jobs.updateCheckpoint(job.id, { sourceResults: result.sourceResults }, owner);
+      this.jobs.markCompleted(job.id, owner);
       metrics.jobsCompleted += 1;
       for (const source of result.sourceResults) {
         if (source.status === 'FAILED') this.pauseStage('market', `Atualização de mercado indisponível: ${source.source}`, source.error, source.source);
       }
       return result;
     } catch (error) {
-      this.jobs.markFailed(job.id, error instanceof Error ? error.message : 'Falha desconhecida no mercado');
+      this.jobs.markFailed(job.id, error instanceof Error ? error.message : 'Falha desconhecida no mercado', owner);
       metrics.jobsFailed += 1;
       this.pauseStage('market', 'Atualização de mercado interrompida', error);
       return undefined;
@@ -515,13 +643,14 @@ export class WorkerRuntime {
       budget -= amount;
     }
     let delivered = 0;
+    const deliveryOrganizationId = mode === 'manual' ? options.organizationId : undefined;
     try {
-      if (this.notifications.pendingCount() > 0) delivered += await this.notifications.deliverPending(new ResendEmailNotifier(this.env.resendApiKey, this.env.notificationEmailFrom));
+      if (!isPausedFor(this.systemState, 'notifications', { channel: 'email' }) && this.notifications.pendingCount(deliveryOrganizationId) > 0) delivered += await this.notifications.deliverPending(new ResendEmailNotifier(this.env.resendApiKey, this.env.notificationEmailFrom), deliveryOrganizationId);
     } catch (error) {
       this.pauseStage('notifications', 'Canal de e-mail indisponível', error);
     }
     try {
-      if (this.pushNotifications.pendingCount() > 0) delivered += await this.pushNotifications.deliverPending(new WebPushNotifier(this.env.vapidSubject, this.env.vapidPublicKey, this.env.vapidPrivateKey));
+      if (!isPausedFor(this.systemState, 'notifications', { channel: 'push' }) && this.pushNotifications.pendingCount(deliveryOrganizationId) > 0) delivered += await this.pushNotifications.deliverPending(new WebPushNotifier(this.env.vapidSubject, this.env.vapidPublicKey, this.env.vapidPrivateKey), deliveryOrganizationId);
     } catch (error) {
       this.pauseStage('notifications', 'Canal de notificações do dispositivo indisponível', error);
     }
@@ -535,13 +664,16 @@ export class WorkerRuntime {
     this.pauseStage('source', reason, source.error, source.source);
   }
 
-  private pauseStage(stage: WorkerStage, reason: string, error: unknown, source?: SourceId): void {
-    this.systemState.pauseStage(stage, reason, { error: error instanceof Error ? error.message : String(error), ...(source ? { source } : {}) });
+  private pauseStage(stage: WorkerStage, reason: string, error: unknown, source?: SourceId, channel?: string): void {
+    const inferredChannel = channel ?? (stage === 'notifications'
+      ? (/e-mail/i.test(reason) ? 'email' : /dispositivo/i.test(reason) ? 'push' : undefined)
+      : undefined);
+    this.systemState.pauseStage(stage, reason, { error: error instanceof Error ? error.message : String(error), ...(source ? { source } : {}), ...(inferredChannel ? { channel: inferredChannel } : {}) });
   }
 }
 
 function newMetrics(startedAt: string, jobsRecovered: number): WorkerCycleMetrics {
-  return { startedAt, finishedAt: startedAt, jobsRecovered, jobsCreated: 0, jobsCompleted: 0, jobsFailed: 0, sourceResults: [], agendaPrepared: 0, notificationsQueued: 0, notificationsDelivered: 0, backupPath: null, pauseReason: null };
+  return { startedAt, finishedAt: startedAt, jobsRecovered, jobsCreated: 0, jobsCompleted: 0, jobsFailed: 0, sourceResults: [], agendaPrepared: 0, notificationsQueued: 0, notificationsDelivered: 0, outboxProcessed: 0, outboxFailed: 0, backupPath: null, pauseReason: null };
 }
 
 function isDurableJob(job: JobRecord): boolean {
@@ -549,23 +681,30 @@ function isDurableJob(job: JobRecord): boolean {
 }
 
 function isGlobalPause(pause: ReturnType<SystemStateRepository['status']>): boolean {
-  return pause.paused && typeof pause.details?.stage !== 'string';
+  return pause.paused && (!pause.pauses || pause.pauses.length === 0) && typeof pause.details?.stage !== 'string';
 }
 
-function isStagePaused(pause: ReturnType<SystemStateRepository['status']>, stage: WorkerStage): boolean {
-  return pause.paused && pause.details?.stage === stage && !pause.details?.source;
+function hasUnscopedPause(repository: SystemStateRepository, stage: WorkerStage): boolean {
+  const status = repository.status();
+  if (isGlobalPause(status)) return true;
+  return repository.listPauses().some((pause) => pause.stage === stage && !pause.source && !pause.channel);
 }
 
-function sourcePauseState(pause: ReturnType<SystemStateRepository['status']>): { blockAll: boolean; source?: SourceId } {
-  if (!pause.paused || pause.details?.stage !== 'source') return { blockAll: false };
-  const source = pause.details.source;
-  if (source === 'PNCP' || source === 'OPEN_DATA' || source === 'BEC/SP') return { blockAll: false, source };
-  return { blockAll: true };
+function isPausedFor(repository: SystemStateRepository, stage: WorkerStage, selector: Omit<PauseSelector, 'stage'>): boolean {
+  return hasUnscopedPause(repository, stage) || repository.isStagePaused(stage, selector);
+}
+
+function sourcePauseState(repository: SystemStateRepository): { blockAll: boolean; sources: ReadonlySet<SourceId> } {
+  const status = repository.status();
+  if (isGlobalPause(status)) return { blockAll: true, sources: new Set() };
+  const pauses = repository.listPauses().filter((pause) => pause.stage === 'source');
+  if (pauses.some((pause) => !pause.source)) return { blockAll: true, sources: new Set() };
+  return { blockAll: false, sources: new Set(pauses.map((pause) => pause.source).filter(isSourceId)) };
 }
 
 function sourcePayload(checkpoint: Record<string, unknown>): SourceJobPayload | undefined {
   if (!isFilterConfig(checkpoint.filters) || typeof checkpoint.organizationId !== 'number' || typeof checkpoint.today !== 'string') return undefined;
-  return { organizationId: checkpoint.organizationId, radarId: typeof checkpoint.radarId === 'number' ? checkpoint.radarId : null, filters: checkpoint.filters, today: checkpoint.today };
+  return { organizationId: checkpoint.organizationId, radarId: typeof checkpoint.radarId === 'number' ? checkpoint.radarId : null, filters: checkpoint.filters, today: checkpoint.today, scopeKey: typeof checkpoint.scopeKey === 'string' ? checkpoint.scopeKey : undefined };
 }
 
 function agendaPayload(checkpoint: Record<string, unknown>): AgendaJobPayload | undefined {
@@ -574,7 +713,7 @@ function agendaPayload(checkpoint: Record<string, unknown>): AgendaJobPayload | 
 
 function marketPayload(checkpoint: Record<string, unknown>): MarketJobPayload | undefined {
   if (!isFilterConfig(checkpoint.filters) || typeof checkpoint.today !== 'string' || typeof checkpoint.lookbackDays !== 'number') return undefined;
-  return { filters: checkpoint.filters, today: checkpoint.today, lookbackDays: checkpoint.lookbackDays };
+  return { filters: checkpoint.filters, today: checkpoint.today, lookbackDays: checkpoint.lookbackDays, organizationId: typeof checkpoint.organizationId === 'number' ? checkpoint.organizationId : undefined, radarId: typeof checkpoint.radarId === 'number' ? checkpoint.radarId : null };
 }
 
 function isFilterConfig(value: unknown): value is FilterConfig {
@@ -591,8 +730,55 @@ function isFilterConfig(value: unknown): value is FilterConfig {
     && typeof filters.scoreWeights === 'object';
 }
 
-function sourceMetric(source: SourceSyncSourceResult): Pick<SourceSyncSourceResult, 'source' | 'status' | 'received' | 'created' | 'updated' | 'errorCategory'> {
-  return { source: source.source, status: source.status, received: source.received, created: source.created, updated: source.updated, errorCategory: source.errorCategory };
+function sourceMetric(source: SourceSyncSourceResult): Pick<SourceSyncSourceResult, 'source' | 'status' | 'received' | 'persisted' | 'created' | 'updated' | 'errorCategory'> {
+  return { source: source.source, status: source.status, received: source.received, persisted: source.persisted, created: source.created, updated: source.updated, errorCategory: source.errorCategory };
+}
+
+function cycleKey(now: Date, _mode: SyncMode, _organizationId: number | undefined, _radarId: number | null, intervalMinutes: number): string {
+  return `cycle:${Math.floor(now.getTime() / (Math.max(1, intervalMinutes) * 60_000))}`;
+}
+
+function sourceScopeKey(organizationId: number, radarId: number | null): string {
+  return `organization:${organizationId}:radar:${radarId ?? 'default'}`;
+}
+
+function marketScopeKey(organizationId: number | undefined, radarId: number | null | undefined): string {
+  return `market:${organizationId ?? 'global'}:${radarId ?? 'all'}`;
+}
+
+function pausedSourceIds(repository: SystemStateRepository, stage: WorkerStage): ReadonlySet<SourceId> {
+  return new Set(repository.listPauses().filter((pause) => pause.stage === stage && isSourceId(pause.source)).map((pause) => pause.source as SourceId));
+}
+
+function sourceIdFrom(value: string | undefined): SourceId | undefined {
+  return isSourceId(value) ? value : undefined;
+}
+
+function isSourceId(value: string | undefined): value is SourceId {
+  return value === 'PNCP' || value === 'OPEN_DATA' || value === 'BEC/SP';
+}
+
+function jobInScope(job: JobRecord, mode: SyncMode, options: WorkerCycleOptions, payload: SourceJobPayload): boolean {
+  if (mode !== 'manual') return true;
+  return options.organizationId !== undefined
+    && payload.organizationId === options.organizationId
+    && job.tenantOrganizationId === options.organizationId
+    && (options.radarId === undefined || payload.radarId === options.radarId);
+}
+
+function outboxEntry(event: OperationalOutboxEvent): SyncEntry | undefined {
+  if (event.eventType !== 'OPPORTUNITY_SYNCED' || !isRecord(event.payload)) return undefined;
+  const current = event.payload.current;
+  if (!isRecord(current)) return undefined;
+  const previous = event.payload.previous;
+  return {
+    previous: isRecord(previous) ? normalizeOpportunitySnapshot(previous as never) : undefined,
+    current: normalizeOpportunitySnapshot(current as never),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function readablePhaseReason(phase: WorkerStage): string {

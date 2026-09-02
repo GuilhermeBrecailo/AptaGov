@@ -6,6 +6,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   DATABASE_URL: z.string().default('./data/licitacoes.db'),
   SYNC_INTERVAL_MINUTES: z.coerce.number().int().positive().default(10),
+  WORKER_LEASE_MS: z.coerce.number().int().positive().default(300_000),
   PNCP_BASE_URL: z.string().url().default('https://pncp.gov.br/api/consulta/v1'),
   OPEN_DATA_BASE_URL: z.string().url().default('https://dadosabertos.compras.gov.br'),
   PNCP_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
@@ -39,6 +40,7 @@ export interface AppEnv {
   nodeEnv: 'development' | 'test' | 'production';
   databaseUrl: string;
   syncIntervalMinutes: number;
+  workerLeaseMs: number;
   pncpBaseUrl: string;
   openDataBaseUrl: string;
   pncpTimeoutMs: number;
@@ -71,6 +73,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     nodeEnv: parsed.NODE_ENV,
     databaseUrl: parsed.DATABASE_URL,
     syncIntervalMinutes: parsed.SYNC_INTERVAL_MINUTES,
+    workerLeaseMs: parsed.WORKER_LEASE_MS,
     pncpBaseUrl: parsed.PNCP_BASE_URL,
     openDataBaseUrl: parsed.OPEN_DATA_BASE_URL,
     pncpTimeoutMs: parsed.PNCP_TIMEOUT_MS,

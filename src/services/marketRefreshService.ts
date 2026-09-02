@@ -15,6 +15,10 @@ export interface MarketRefreshRunInput {
   filters: FilterConfig;
   today?: Date;
   lookbackDays?: number;
+  organizationId?: number;
+  radarId?: number | null;
+  scopeKey?: string;
+  skipSources?: ReadonlySet<SourceId>;
 }
 
 export interface MarketRefreshSourceResult {
@@ -51,7 +55,8 @@ export class MarketRefreshService {
 
   async run(input: MarketRefreshRunInput): Promise<MarketRefreshResult> {
     const query = buildQuery(input);
-    const sourceResults = await Promise.all(this.options.clients.map((client) => this.runSource(client, query)));
+    const clients = this.options.clients.filter((client) => !input.skipSources?.has(client.id));
+    const sourceResults = await Promise.all(clients.map((client) => this.runSource(client, query)));
     if (sourceResults.length > 0 && sourceResults.every((result) => result.status === 'FAILED')) {
       const firstFailure = sourceResults[0]?.error;
       throw firstFailure instanceof Error ? firstFailure : new Error('Nenhuma fonte de mercado disponivel');
@@ -65,6 +70,24 @@ export class MarketRefreshService {
       observationsReceived: sum(sourceResults, 'observationsReceived'),
       resultsReceived: sum(sourceResults, 'resultsReceived'),
     };
+  }
+
+  async healthCheck(filters: FilterConfig, today = new Date(), source?: SourceId): Promise<boolean> {
+    const clients = source ? this.options.clients.filter((client) => client.id === source) : this.options.clients;
+    if (clients.length === 0) return false;
+    const query = buildQuery({ filters, today, scopeKey: 'health-check' });
+    const checks = await Promise.all(clients.map(async (client) => {
+      try {
+        await this.breakers.get(client.id)!.execute(async () => {
+          const iterator = client.listMarketPages({ ...query, cursor: null })[Symbol.asyncIterator]();
+          await iterator.next();
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    }));
+    return checks.every(Boolean);
   }
 
   private async runSource(client: PagedOfficialSourceClient, query: MarketQuery): Promise<MarketRefreshSourceResult> {
@@ -82,7 +105,7 @@ export class MarketRefreshService {
       };
     } catch (error) {
       const category = classifySourceError(error);
-      this.options.repository.recordFailure(client.id, { dateFrom: query.dateFrom, dateTo: query.dateTo }, category, retryAt(category));
+      this.options.repository.recordFailure(client.id, { dateFrom: query.dateFrom, dateTo: query.dateTo }, category, retryAt(category), 'market', query.scopeKey ?? 'default');
       return {
         source: client.id,
         status: 'FAILED',
@@ -109,6 +132,10 @@ function buildQuery(input: MarketRefreshRunInput): MarketQuery {
     dateFrom: dateFromDate.toISOString().slice(0, 10),
     dateTo,
     filters: input.filters,
+    flow: 'market',
+    scopeKey: input.scopeKey ?? 'default',
+    organizationId: input.organizationId,
+    radarId: input.radarId,
   };
 }
 
