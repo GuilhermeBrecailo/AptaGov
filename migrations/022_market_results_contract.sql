@@ -1,12 +1,3 @@
-ALTER TABLE market_results ADD COLUMN normalized_description TEXT NOT NULL DEFAULT '';
-ALTER TABLE market_results ADD COLUMN unit TEXT NOT NULL DEFAULT '';
-ALTER TABLE market_results ADD COLUMN quantity REAL NOT NULL DEFAULT 0;
-ALTER TABLE market_results ADD COLUMN unit_price_cents INTEGER;
-ALTER TABLE market_results ADD COLUMN total_price_cents INTEGER;
-ALTER TABLE market_results ADD COLUMN organization TEXT NOT NULL DEFAULT '';
-ALTER TABLE market_results ADD COLUMN state TEXT NOT NULL DEFAULT '';
-ALTER TABLE market_results ADD COLUMN opportunity_id INTEGER REFERENCES opportunities(id) ON DELETE SET NULL;
-
 UPDATE market_results
 SET normalized_description = COALESCE(normalized_description, ''),
     unit = COALESCE(unit, ''),

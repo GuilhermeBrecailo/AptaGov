@@ -34,9 +34,34 @@ export function migrateDatabase(db: SqliteDatabase): void {
     const migrationPath = resolve(rootDirectory, `migrations/${version}.sql`);
     const migration = readFileSync(migrationPath, 'utf8');
     const apply = db.transaction(() => {
-      db.exec(migration);
+      if (version === '022_market_results_contract') {
+        applyMarketResultsContractUpgrade(db, migration);
+      } else {
+        db.exec(migration);
+      }
       db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(version, new Date().toISOString());
     });
     apply();
   }
+}
+
+function applyMarketResultsContractUpgrade(db: SqliteDatabase, postUpgradeSql: string): void {
+  const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'market_results'").get();
+  if (!table) throw new Error('Cannot apply market_results contract: table does not exist');
+
+  const columns = new Set((db.prepare("PRAGMA table_info('market_results')").all() as Array<{ name: string }>).map((column) => column.name));
+  const missingColumns: Array<[string, string]> = [
+    ['normalized_description', "ALTER TABLE market_results ADD COLUMN normalized_description TEXT NOT NULL DEFAULT ''"],
+    ['unit', "ALTER TABLE market_results ADD COLUMN unit TEXT NOT NULL DEFAULT ''"],
+    ['quantity', "ALTER TABLE market_results ADD COLUMN quantity REAL NOT NULL DEFAULT 0"],
+    ['unit_price_cents', 'ALTER TABLE market_results ADD COLUMN unit_price_cents INTEGER'],
+    ['total_price_cents', 'ALTER TABLE market_results ADD COLUMN total_price_cents INTEGER'],
+    ['organization', "ALTER TABLE market_results ADD COLUMN organization TEXT NOT NULL DEFAULT ''"],
+    ['state', "ALTER TABLE market_results ADD COLUMN state TEXT NOT NULL DEFAULT ''"],
+    ['opportunity_id', 'ALTER TABLE market_results ADD COLUMN opportunity_id INTEGER REFERENCES opportunities(id) ON DELETE SET NULL'],
+  ];
+  for (const [column, statement] of missingColumns) {
+    if (!columns.has(column)) db.exec(statement);
+  }
+  db.exec(postUpgradeSql);
 }
