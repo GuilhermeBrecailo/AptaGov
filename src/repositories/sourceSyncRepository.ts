@@ -218,7 +218,7 @@ export class SourceSyncRepository {
       }
       const now = new Date().toISOString();
       this.db.prepare(`
-        UPDATE source_checkpoints_scoped
+        UPDATE source_checkpoints
         SET cursor = ?,
             status = ?,
             received_count = received_count + ?,
@@ -520,7 +520,7 @@ export class SourceSyncRepository {
   getCheckpoint(sourceCode: SourceId, window: SourceWindow, flow?: SourceFlow, scopeKey = 'default'): SourceCheckpoint | undefined {
     const requestedFlow = flow ?? 'opportunity';
     const row = this.db.prepare(`
-      SELECT * FROM source_checkpoints_scoped
+      SELECT * FROM source_checkpoints
       WHERE source_code = ? AND flow = ? AND scope_key = ? AND window_start = ? AND window_end = ?
     `).get(sourceCode, requestedFlow, scopeKey, window.dateFrom, window.dateTo) as CheckpointRow | undefined;
     if (row) return mapCheckpoint(row);
@@ -530,14 +530,14 @@ export class SourceSyncRepository {
           window_start, window_end, cursor, status, received_count, persisted_count,
           created_count, updated_count, error_category, last_success_at, next_retry_at,
           created_at, updated_at
-        FROM source_checkpoints
+        FROM source_checkpoints_legacy
         WHERE source_code = ? AND window_start = ? AND window_end = ?
       `).get(sourceCode, window.dateFrom, window.dateTo) as CheckpointRow | undefined;
       if (legacyRow) return mapCheckpoint(legacyRow);
     }
     if (flow !== undefined) return undefined;
     const compatibleMarketRows = this.db.prepare(`
-      SELECT * FROM source_checkpoints_scoped
+      SELECT * FROM source_checkpoints
       WHERE source_code = ? AND flow = 'market' AND window_start = ? AND window_end = ?
       ORDER BY updated_at DESC
       LIMIT 2
@@ -563,7 +563,7 @@ export class SourceSyncRepository {
     const now = new Date().toISOString();
     const existing = this.getCheckpoint(sourceCode, window, flow, scopeKey);
     this.db.prepare(`
-      INSERT INTO source_checkpoints_scoped (
+      INSERT INTO source_checkpoints (
         source_code, flow, scope_key, window_start, window_end, cursor, status, error_category,
         next_retry_at, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, 'FAILED', ?, ?, ?, ?)
@@ -634,7 +634,7 @@ export class SourceSyncRepository {
       SELECT source_code, window_start, window_end, cursor, status,
         received_count, persisted_count, created_count, updated_count, error_category,
         last_success_at, next_retry_at, created_at, updated_at
-      FROM source_checkpoints_scoped
+      FROM source_checkpoints
       WHERE source_code = ? AND flow = 'opportunity' AND scope_key = 'default'
         AND window_start = ? AND window_end = ?
     `).get(sourceCode, window.dateFrom, window.dateTo) as {
@@ -655,7 +655,7 @@ export class SourceSyncRepository {
     } | undefined;
     if (!row) return;
     this.db.prepare(`
-      INSERT INTO source_checkpoints (
+      INSERT INTO source_checkpoints_legacy (
         source_code, window_start, window_end, cursor, status,
         received_count, persisted_count, created_count, updated_count, error_category,
         last_success_at, next_retry_at, created_at, updated_at
@@ -692,11 +692,11 @@ export class SourceSyncRepository {
   private ensureCheckpoint(sourceCode: SourceId, flow: SourceFlow, scopeKey: string, window: SourceWindow, cursor: string | null): void {
     const now = new Date().toISOString();
     this.db.prepare(`
-      INSERT INTO source_checkpoints_scoped (
+      INSERT INTO source_checkpoints (
         source_code, flow, scope_key, window_start, window_end, cursor, status, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, 'RUNNING', ?, ?)
       ON CONFLICT(source_code, flow, scope_key, window_start, window_end) DO UPDATE SET
-        status = CASE WHEN source_checkpoints_scoped.status = 'COMPLETED' THEN 'RUNNING' ELSE source_checkpoints_scoped.status END,
+        status = CASE WHEN source_checkpoints.status = 'COMPLETED' THEN 'RUNNING' ELSE source_checkpoints.status END,
         updated_at = excluded.updated_at
     `).run(sourceCode, flow, scopeKey, window.dateFrom, window.dateTo, cursor, now, now);
   }
@@ -714,7 +714,7 @@ export class SourceSyncRepository {
     now: string,
   ): void {
     this.db.prepare(`
-      UPDATE source_checkpoints_scoped
+      UPDATE source_checkpoints
       SET cursor = ?,
           status = ?,
           received_count = received_count + ?,

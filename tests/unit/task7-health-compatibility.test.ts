@@ -14,25 +14,24 @@ import { WorkerRuntime } from '../../src/workerRuntime';
 const window = { dateFrom: '2026-08-28', dateTo: '2026-08-31' };
 
 describe('Task 7: compatibilidade legada e health checks efetivos', () => {
-  it('mantém ON CONFLICT legado funcional sem compartilhar cursor com o namespace scoped', () => {
+  it('mantém SELECT/UPSERT do worker 0aca7bf e separa opportunity/market no schema fresh', () => {
     const db = createTestDatabase();
-    const scopedColumns = (db.prepare("PRAGMA table_info('source_checkpoints_scoped')").all() as Array<{ name: string }>).map((row) => row.name);
-    const legacyColumns = (db.prepare("PRAGMA table_info('source_checkpoints')").all() as Array<{ name: string }>).map((row) => row.name);
+    const scopedColumns = (db.prepare("PRAGMA table_info('source_checkpoints')").all() as Array<{ name: string }>).map((row) => row.name);
+    const legacyColumns = (db.prepare("PRAGMA table_info('source_checkpoints_legacy')").all() as Array<{ name: string }>).map((row) => row.name);
     expect(scopedColumns).toEqual(expect.arrayContaining(['flow', 'scope_key']));
     expect(legacyColumns).toEqual(expect.arrayContaining(['source_code', 'window_start', 'window_end', 'cursor', 'status']));
     expect(legacyColumns).not.toContain('flow');
 
-    const legacyUpsert = db.prepare(`
+    const previousWorkerUpsert = db.prepare(`
       INSERT INTO source_checkpoints (
-        source_code, window_start, window_end, cursor, status,
-        received_count, persisted_count, created_count, updated_count,
-        created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?)
-      ON CONFLICT(source_code, window_start, window_end) DO UPDATE SET
+        source_code, flow, scope_key, window_start, window_end, cursor, status,
+        received_count, persisted_count, created_count, updated_count, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?)
+      ON CONFLICT(source_code, flow, scope_key, window_start, window_end) DO UPDATE SET
         cursor = excluded.cursor, status = excluded.status, updated_at = excluded.updated_at
     `);
-    legacyUpsert.run('PNCP', window.dateFrom, window.dateTo, 'legacy:2', 'RUNNING', '2026-09-02T10:00:00.000Z', '2026-09-02T10:00:00.000Z');
-    legacyUpsert.run('PNCP', window.dateFrom, window.dateTo, 'legacy:3', 'COMPLETED', '2026-09-02T10:01:00.000Z', '2026-09-02T10:01:00.000Z');
+    previousWorkerUpsert.run('PNCP', 'opportunity', 'default', window.dateFrom, window.dateTo, 'legacy:2', 'RUNNING', '2026-09-02T10:00:00.000Z', '2026-09-02T10:00:00.000Z');
+    previousWorkerUpsert.run('PNCP', 'opportunity', 'default', window.dateFrom, window.dateTo, 'legacy:3', 'COMPLETED', '2026-09-02T10:01:00.000Z', '2026-09-02T10:01:00.000Z');
 
     const repository = new SourceSyncRepository(db);
     expect(repository.getCheckpoint('PNCP', window, 'opportunity', 'default')).toMatchObject({
@@ -41,12 +40,13 @@ describe('Task 7: compatibilidade legada e health checks efetivos', () => {
       cursor: 'legacy:3',
       status: 'COMPLETED',
     });
-    repository.beginRun('PNCP', window, null, 'market', 'market:separate');
-    expect(db.prepare("SELECT cursor FROM source_checkpoints_scoped WHERE source_code = 'PNCP' AND flow = 'market' AND scope_key = 'market:separate'").get()).toMatchObject({ cursor: null });
-    expect(db.prepare('SELECT cursor FROM source_checkpoints WHERE source_code = ? AND window_start = ? AND window_end = ?').get('PNCP', window.dateFrom, window.dateTo)).toMatchObject({ cursor: 'legacy:3' });
+    repository.beginRun('PNCP', window, 'market:1', 'market', 'market:separate');
+    previousWorkerUpsert.run('PNCP', 'opportunity', 'default', window.dateFrom, window.dateTo, 'legacy:4', 'COMPLETED', '2026-09-02T10:02:00.000Z', '2026-09-02T10:02:00.000Z');
+    expect(repository.getCheckpoint('PNCP', window, 'opportunity', 'default')).toMatchObject({ cursor: 'legacy:4' });
+    expect(repository.getCheckpoint('PNCP', window, 'market', 'market:separate')).toMatchObject({ cursor: 'market:1' });
 
     repository.recordFailure('PNCP', window, 'UNAVAILABLE', null, 'opportunity', 'default');
-    expect(db.prepare('SELECT status FROM source_checkpoints WHERE source_code = ? AND window_start = ? AND window_end = ?').get('PNCP', window.dateFrom, window.dateTo)).toMatchObject({ status: 'FAILED' });
+    expect(db.prepare('SELECT status FROM source_checkpoints_legacy WHERE source_code = ? AND window_start = ? AND window_end = ?').get('PNCP', window.dateFrom, window.dateTo)).toMatchObject({ status: 'FAILED' });
   });
 
   it('não libera pausa de notificações sem canal enquanto algum canal configurado não estiver saudável', async () => {

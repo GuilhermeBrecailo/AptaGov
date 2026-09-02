@@ -1,7 +1,7 @@
 # Task 7 — Orquestração durável de fontes oficiais
 
 Data: 2026-09-02  
-Status: rodada 6 — corte parcial de toggle automático e diagnóstico de mercado concluído; compatibilidade de migration pendente
+Status: rodada 7 — compatibilidade de rollout/rollback do checkpoint concluída e verificada localmente
 
 ## Correções entregues
 
@@ -112,4 +112,17 @@ Limitações reais desta rodada:
 
 Verificações do corte: focused Task 7 (13 arquivos, 55 testes), lint e typecheck passaram.
 
-A compatibilidade da migration 030 com o worker anterior/rollback permanece pendente para o próximo corte, conforme solicitado.
+A compatibilidade da migration 030 com o worker anterior/rollback foi concluída nesta rodada.
+
+## Rodada 7 — compatibilidade de rollout/rollback do checkpoint
+
+- A migration 030 deixou de renomear a tabela scoped. `source_checkpoints` permanece o contrato canônico com `flow`/`scope_key` e chave de cinco colunas usado pelo worker anterior `0aca7bf`; `source_checkpoints_legacy` fica separado para o snapshot de três colunas. O novo repositório usa a mesma tabela canônica, mantendo opportunity e market independentes.
+- A migration 031 é aditiva e corrige bancos que já aplicaram a 030 antiga: detecta o swap, restaura os nomes, mescla o snapshot legado apenas em `opportunity/default` escolhendo o registro mais recente por `updated_at`, e preserva o namespace market sem compartilhar cursor. A operação é idempotente e mantém o SQL antigo de `SELECT`/`UPSERT` funcional após fresh migration e rollback.
+- Testes executáveis cobrem schema fresh, SQL do worker `0aca7bf`, progresso posterior escrito pelo worker anterior visível no repositório novo, reparo da 030 antiga e isolamento do cursor market.
+
+Verificações finais: focused Task 7 + source checkpoint (15 arquivos, 58 testes), suíte completa (55 arquivos, 196 testes), lint, typecheck e build passaram.
+
+Limitações residuais:
+
+- A compatibilidade direta fica garantida para o contrato scoped do `0aca7bf`. Workers anteriores à migration 023 que exigem `ON CONFLICT(source_code, window_start, window_end)` continuam usando explicitamente `source_checkpoints_legacy` e não podem compartilhar cursor com market; o rollback deve usar o worker `0aca7bf`/scoped ou uma rotina compatível com a tabela legacy.
+- A execução condicional da migration 031 depende do runner desta aplicação; SQLite não oferece uma forma portátil de condicionar esses `ALTER TABLE` apenas no arquivo SQL. Ferramentas externas de migração devem executar o runner da aplicação ou implementar a mesma guarda.
