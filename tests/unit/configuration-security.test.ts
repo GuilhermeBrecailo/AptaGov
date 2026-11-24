@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { loadEnv } from '../../src/config/env';
 import { loadFilters } from '../../src/config/filters';
 
-const root = resolve('C:/Users/user/Documents/dev/licitacoes-pncp');
+const root = resolve(process.cwd());
 
 describe('configuração e segurança operacional', () => {
   it('preserva o contrato OPENAI e mantém a IA desligada por padrão', () => {

@@ -310,7 +310,7 @@ describe('agenda e histórico operacional via handlers', () => {
   });
 
   it('mantém os endpoints protegidos por billing ativo operacional', () => {
-    const root = resolve('C:/Users/user/Documents/dev/licitacoes-pncp/server/api');
+    const root = resolve(process.cwd(), 'server/api');
 
     expect(readFileSync(resolve(root, 'agenda.get.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");
     expect(readFileSync(resolve(root, 'agenda.post.ts'), 'utf8')).toContain("requireActiveBilling(event, 'kanban')");

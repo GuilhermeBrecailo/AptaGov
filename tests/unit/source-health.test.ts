@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { createTestDatabase } from '../../src/db/database';
 import { loadEnv } from '../../src/config/env';
 
-const root = resolve('C:/Users/user/Documents/dev/licitacoes-pncp');
+const root = resolve(process.cwd());
 
 describe('saúde agregada das fontes', () => {
   it('expõe a saúde somente pelo guard de administrador da plataforma', () => {
