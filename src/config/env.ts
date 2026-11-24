@@ -38,6 +38,10 @@ const envSchema = z.object({
   BEC_SP_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
   BEC_SP_MAX_RETRIES: z.coerce.number().int().min(0).default(3),
   PLATFORM_ADMIN_EMAILS: z.string().default(''),
+  ANTHROPIC_API_KEY: z.string().default(''),
+  EDITAL_ANALYSIS_ORGANIZATION_IDS: z.string().default(''),
+  EDITAL_ANALYSIS_MONTHLY_LIMIT: z.coerce.number().int().positive().default(30),
+  EDITAL_ANALYSIS_MODEL: z.string().default('claude-opus-5-5'),
 });
 
 export interface AppEnv {
@@ -73,6 +77,10 @@ export interface AppEnv {
   becSpTimeoutMs: number;
   becSpMaxRetries: number;
   platformAdminEmails: string[];
+  anthropicApiKey: string;
+  editalAnalysisOrganizationIds: number[];
+  editalAnalysisMonthlyLimit: number;
+  editalAnalysisModel: string;
 }
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
@@ -110,6 +118,12 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     becSpTimeoutMs: parsed.BEC_SP_TIMEOUT_MS,
     becSpMaxRetries: parsed.BEC_SP_MAX_RETRIES,
     platformAdminEmails: parsed.PLATFORM_ADMIN_EMAILS.split(',').map((email) => email.trim().toLowerCase()).filter(Boolean),
+    anthropicApiKey: parsed.ANTHROPIC_API_KEY,
+    editalAnalysisOrganizationIds: parsed.EDITAL_ANALYSIS_ORGANIZATION_IDS.split(',')
+      .map((id) => Number(id.trim()))
+      .filter((id) => Number.isInteger(id) && id > 0),
+    editalAnalysisMonthlyLimit: parsed.EDITAL_ANALYSIS_MONTHLY_LIMIT,
+    editalAnalysisModel: parsed.EDITAL_ANALYSIS_MODEL,
   };
 }
 

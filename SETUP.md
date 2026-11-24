@@ -222,3 +222,23 @@ O conjunto de testes cobre deduplicação, paginação completa, score, notifica
 ### Resultado registrado
 
 Na validação local de 02/09/2026, lint, typecheck, build e 215 testes em 58 arquivos foram aprovados. As migrações passaram em banco novo e em uma cópia do banco local. O fluxo operacional validou classificação, Kanban, checklist, agenda, Mercado, backup e uma entrega real no Resend com deduplicação do segundo evento. O PNCP e a fonte de Dados Abertos retornaram zero registros novos na janela dos filtros atuais; por isso, o relatório separa claramente registros oficiais recebidos de uma oportunidade já persistida usada para completar o ensaio operacional.
+
+## Análise de edital com IA
+
+A análise de editais de obras usa a API da Anthropic e fica liberada apenas para as organizações listadas. Configure no `.env`:
+
+```env
+ANTHROPIC_API_KEY=...
+EDITAL_ANALYSIS_ORGANIZATION_IDS=1,2
+EDITAL_ANALYSIS_MONTHLY_LIMIT=30
+EDITAL_ANALYSIS_MODEL=claude-opus-5-5
+```
+
+- `ANTHROPIC_API_KEY`: chave da API da Anthropic.
+- `EDITAL_ANALYSIS_ORGANIZATION_IDS`: IDs das organizações liberadas, separados por vírgula (valores inválidos são ignorados).
+- `EDITAL_ANALYSIS_MONTHLY_LIMIT`: máximo de análises por organização por mês (padrão 30).
+- `EDITAL_ANALYSIS_MODEL`: modelo usado (padrão `claude-opus-5-5`).
+
+Custo aproximado: de alguns dólares por análise, variando com o tamanho do edital; o limite mensal ajuda a controlar o gasto.
+
+Privacidade: o perfil da empresa (dados cadastrais e de habilitação) e o texto do edital são enviados à API da Anthropic para gerar a análise.
