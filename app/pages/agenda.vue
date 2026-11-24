@@ -133,11 +133,6 @@ async function savePreferences(next: Omit<OrganizationAlertPreferences, 'organiz
   }
 }
 
-async function logout() {
-  await $fetch('/api/auth/logout', { method: 'POST' });
-  await navigateTo('/login');
-}
-
 function reminderEntry(reminder: OpportunityReminder, opportunity: CatalogOpportunity): AgendaEntryView {
   const pending = reminder.status === 'PENDING';
   return {
@@ -219,32 +214,22 @@ function rangeBoundary(value: string, end: boolean): string {
 </script>
 
 <template>
-  <div class="product-shell">
-    <header class="app-topbar">
-      <div class="topbar-brand-area">
-        <AppNavDrawer :auth="auth" active="agenda" @logout="logout" />
-        <div class="brand-lockup"><div class="brand-mark">A</div><div><span class="brand-name">AptaGov</span><span class="brand-caption">Inteligência para vender ao governo</span></div></div>
-      </div>
-      <div class="account-area"><div class="organization-chip"><span class="org-avatar">{{ auth?.organization.name.slice(0, 1).toUpperCase() }}</span><span>{{ auth?.organization.name }}</span></div><span class="user-name">{{ auth?.user.name }}</span><button class="topbar-action" type="button" @click="logout">Sair</button></div>
-    </header>
-
-    <main class="app-content agenda-page">
-      <div class="app-heading">
-        <div><span class="section-kicker">Operação de mercado</span><h1>Agenda operacional</h1><p>Veja o que vence, o que mudou e o que a equipe precisa preparar.</p></div>
-      </div>
-      <div v-if="message" class="notice" role="status">{{ message }}</div>
-      <AgendaView
-        :entries="entries"
-        :opportunities="opportunities"
-        :preferences="preferences ?? null"
-        :range="range"
-        :loading="agendaLoadingState"
-        :saving="saving"
-        @range-change="range = $event"
-        @save-reminder="saveReminder"
-        @update-status="updateStatus"
-        @save-preferences="savePreferences"
-      />
-    </main>
-  </div>
+  <AppShell :auth="auth" active="agenda" content-class="agenda-page">
+    <div class="app-heading">
+      <div><span class="section-kicker">Operação de mercado</span><h1>Agenda operacional</h1><p>Veja o que vence, o que mudou e o que a equipe precisa preparar.</p></div>
+    </div>
+    <div v-if="message" class="notice" role="status">{{ message }}</div>
+    <AgendaView
+      :entries="entries"
+      :opportunities="opportunities"
+      :preferences="preferences ?? null"
+      :range="range"
+      :loading="agendaLoadingState"
+      :saving="saving"
+      @range-change="range = $event"
+      @save-reminder="saveReminder"
+      @update-status="updateStatus"
+      @save-preferences="savePreferences"
+    />
+  </AppShell>
 </template>

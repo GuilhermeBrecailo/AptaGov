@@ -18,7 +18,8 @@ describe('contrato visual operacional', () => {
     const editor = readFileSync('app/components/ChecklistItemEditor.vue', 'utf8');
     const details = readFileSync('app/components/OpportunityDetails.vue', 'utf8');
     const kanban = readFileSync('app/components/OpportunityKanban.vue', 'utf8');
-    const home = readFileSync('app/pages/index.vue', 'utf8');
+    // O painel delega estado e ações ao composable; o contrato vale para os dois juntos.
+    const home = readFileSync('app/pages/index.vue', 'utf8') + readFileSync('app/composables/useOpportunityWorkspace.ts', 'utf8');
     const viewModels = readFileSync('app/viewModels/operationalViewModels.ts', 'utf8');
 
     expect(agendaPage).toContain('/api/agenda');

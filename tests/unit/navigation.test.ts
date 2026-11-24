@@ -7,6 +7,9 @@ describe('navegação autenticada do SaaS', () => {
   const plan = readFileSync('app/pages/plano.vue', 'utf8');
   const home = readFileSync('app/pages/index.vue', 'utf8');
   const admin = readFileSync('app/pages/admin.vue', 'utf8');
+  const shell = readFileSync('app/components/AppShell.vue', 'utf8');
+  const authenticatedPages = ['index', 'agenda', 'mercado', 'configuracao', 'plano', 'admin']
+    .map((page) => readFileSync(`app/pages/${page}.vue`, 'utf8'));
 
 it('oferece hambúrguer, Painel, Agenda, Configuração e Plano', () => {
   expect(drawer).toContain('aria-label="Abrir menu"');
@@ -33,8 +36,10 @@ it('oferece hambúrguer, Painel, Agenda, Configuração e Plano', () => {
     expect(plan).toContain("useFetch<BillingPayload>('/api/billing')");
     expect(plan).toContain('BillingPlans');
     expect(plan).toContain('Plano atual');
-    expect(home).toContain('<AppNavDrawer');
-    expect(admin).toContain('<AppNavDrawer');
+    expect(shell).toContain('<AppNavDrawer');
+    expect(shell).toContain("$fetch('/api/auth/logout'");
+    for (const page of authenticatedPages) expect(page).toContain('<AppShell');
+    expect(admin).toContain('active="admin"');
     expect(home).not.toContain('class="settings-card"');
     expect(home).not.toContain('class="billing-card"');
     expect(configuration).toContain('enableDeviceNotifications');

@@ -2,6 +2,7 @@
 import OpportunityChecklist from './OpportunityChecklist.vue';
 import type { CatalogOpportunity, ChecklistItem, ChecklistPatchInput, KanbanState } from '../types';
 import { kanbanColumns } from '../types';
+import { deadlineInfo, scoreTone } from '../utils/format';
 
 defineProps<{
   items: CatalogOpportunity[];
@@ -39,11 +40,14 @@ function actionLabel(state: KanbanState) {
 
 <template>
   <div class="kanban-board" :class="{ 'is-loading': loading }">
-    <section v-for="column in kanbanColumns" :key="column.state" class="kanban-column">
+    <section v-for="column in kanbanColumns" :key="column.state" class="kanban-column" :data-state="column.state">
       <header class="kanban-column-head"><div><span class="column-kicker">{{ column.state }}</span><h3>{{ column.label }}</h3></div><span class="count-badge">{{ byState(items, column.state).length }}</span></header>
-      <div v-if="!byState(items, column.state).length" class="column-empty">Arraste seu próximo passo para cá.</div>
+      <div v-if="!byState(items, column.state).length" class="column-empty">Nenhuma oportunidade nesta etapa.</div>
       <article v-for="item in byState(items, column.state)" :key="item.id" class="kanban-card" @click="emit('select', item)">
-        <span class="score-badge">{{ item.score }}/100</span>
+        <div class="kanban-card-badges">
+          <span class="score-badge" :class="`tone-${scoreTone(item.score)}`">{{ item.score }}/100</span>
+          <span v-if="deadlineInfo(item.biddingDeadline)" class="deadline-chip" :class="`tone-${deadlineInfo(item.biddingDeadline)?.tone}`">{{ deadlineInfo(item.biddingDeadline)?.label }}</span>
+        </div>
         <h4>{{ item.title }}</h4>
         <p>{{ item.organization }}</p>
         <div class="card-footer"><span>{{ item.state }}</span><button class="icon-button small" aria-label="Ver detalhes" @click.stop="emit('select', item)">↗</button></div>

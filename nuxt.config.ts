@@ -9,7 +9,7 @@ export default defineNuxtConfig({
         { rel: 'apple-touch-icon', href: '/icons/icon.svg' },
       ],
       meta: [
-        { name: 'theme-color', content: '#14213d' },
+        { name: 'theme-color', content: '#0f1720' },
         { name: 'mobile-web-app-capable', content: 'yes' },
         { name: 'apple-mobile-web-app-capable', content: 'yes' },
       ],

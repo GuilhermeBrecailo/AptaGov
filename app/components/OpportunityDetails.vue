@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { watch } from 'vue';
+import { onBeforeUnmount, onMounted, watch } from 'vue';
 import OpportunityChecklist from './OpportunityChecklist.vue';
 import MarketSummary from './MarketSummary.vue';
+import { deadlineInfo, formatDate as date, formatMoney as money, scoreTone } from '../utils/format';
 import type { CatalogOpportunity, ChecklistPatchInput, ChecklistItem, OpportunityMarketPayload } from '../types';
 
 const props = defineProps<{
@@ -39,13 +40,12 @@ const emit = defineEmits<{
   checklistSave: [itemId: number, patch: ChecklistPatchInput];
 }>();
 
-function money(cents: number) {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(cents / 100);
+function handleKeydown(event: globalThis.KeyboardEvent) {
+  if (event.key === 'Escape' && props.item) emit('close');
 }
 
-function date(value: string | null) {
-  return value ? new Intl.DateTimeFormat('pt-BR').format(new Date(value)) : 'Sem prazo informado';
-}
+onMounted(() => globalThis.addEventListener('keydown', handleKeydown));
+onBeforeUnmount(() => globalThis.removeEventListener('keydown', handleKeydown));
 
 function scoreLabel(value: string): string {
   return ({ keyword: 'Palavras-chave', region: 'Região', value: 'Valor', deadline: 'Prazo' } as Record<string, string>)[value] ?? value;
@@ -54,9 +54,12 @@ function scoreLabel(value: string): string {
 
 <template>
   <div v-if="item" class="details-backdrop" @click.self="emit('close')">
-    <aside class="details-panel">
+    <aside class="details-panel" role="dialog" aria-modal="true" :aria-label="item.title">
       <button class="close-button" aria-label="Fechar detalhes" @click="emit('close')">×</button>
-      <span class="score-badge large">{{ item.score }}/100 · regras</span>
+      <div class="details-badges">
+        <span class="score-badge large" :class="`tone-${scoreTone(item.score)}`">{{ item.score }}/100 · aderência</span>
+        <span v-if="deadlineInfo(item.biddingDeadline)" class="deadline-chip" :class="`tone-${deadlineInfo(item.biddingDeadline)?.tone}`">{{ deadlineInfo(item.biddingDeadline)?.label }}</span>
+      </div>
       <span class="details-eyebrow">{{ item.state }} · {{ item.modality || 'Modalidade não informada' }}</span>
       <span class="details-source">Fonte: {{ item.sourceLabel }}</span>
       <h2>{{ item.title }}</h2>

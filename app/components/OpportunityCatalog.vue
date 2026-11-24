@@ -1,42 +1,32 @@
 <script setup lang="ts">
 import type { CatalogOpportunity } from '../types';
+import { deadlineInfo, formatDate, formatMoney, scoreTone } from '../utils/format';
 
 defineProps<{ items: CatalogOpportunity[]; loading: boolean }>();
 const emit = defineEmits<{ select: [item: CatalogOpportunity]; add: [item: CatalogOpportunity]; feedback: [item: CatalogOpportunity, status: 'FAVORITED' | 'NOT_RELEVANT' | null] }>();
-
-function money(cents: number) {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(cents / 100);
-}
-
-function date(value: string | null) {
-  return value ? new Intl.DateTimeFormat('pt-BR').format(new Date(value)) : 'Sem prazo informado';
-}
-
 </script>
 
 <template>
-  <div class="catalog-list" :class="{ 'is-loading': loading }">
+  <div class="catalog-list" :class="{ 'is-loading': loading }" :aria-busy="loading">
     <div v-if="!items.length && !loading" class="empty-state">
-      <span class="empty-icon">⌕</span>
       <strong>Nenhuma licitação encontrada</strong>
-      <p>Tente mudar a busca ou reduzir o score mínimo.</p>
+      <p>Mude a pesquisa ou os filtros acima.</p>
     </div>
     <article v-for="item in items" :key="item.id" class="opportunity-row" @click="emit('select', item)">
+      <span class="row-score" :class="`tone-${scoreTone(item.score)}`" :title="`Aderência ${item.score} de 100`">{{ item.score }}</span>
       <div class="row-main">
-        <div class="row-badges"><span class="score-badge">{{ item.score }}/100</span><span class="source-badge">{{ item.sourceLabel }}</span></div>
         <h3>{{ item.title }}</h3>
-        <p>{{ item.organization }} <span>·</span> {{ item.state }}{{ item.city ? ` · ${item.city}` : '' }}</p>
+        <p>{{ item.organization }} · {{ item.city ? `${item.city}/` : '' }}{{ item.state }}</p>
       </div>
       <div class="row-meta">
-        <span><small>Prazo</small>{{ date(item.biddingDeadline) }}</span>
-        <span v-if="item.estimatedValueCents"><small>Valor estimado</small>{{ money(item.estimatedValueCents) }}</span>
+        <strong v-if="item.estimatedValueCents">{{ formatMoney(item.estimatedValueCents) }}</strong>
+        <span :class="`deadline-${deadlineInfo(item.biddingDeadline)?.tone ?? 'normal'}`">{{ item.biddingDeadline ? formatDate(item.biddingDeadline) : 'Sem prazo' }}<template v-if="deadlineInfo(item.biddingDeadline) && deadlineInfo(item.biddingDeadline)?.tone !== 'normal'"> · {{ deadlineInfo(item.biddingDeadline)?.label }}</template></span>
       </div>
       <div class="row-actions" @click.stop>
-        <button v-if="!item.inKanban" class="btn btn-primary btn-small" @click="emit('add', item)">Adicionar ao kanban</button>
-        <span v-else class="saved-label">No kanban</span>
-        <button class="text-action catalog-feedback-action" type="button" :class="{ selected: item.favorite }" :aria-label="item.favorite ? 'Remover dos favoritos' : 'Favoritar'" @click="emit('feedback', item, item.favorite ? null : 'FAVORITED')">{{ item.favorite ? 'Favoritada' : 'Favoritar' }}</button>
-        <button class="text-action catalog-feedback-action muted-action" type="button" @click="emit('feedback', item, item.notRelevant ? null : 'NOT_RELEVANT')">{{ item.notRelevant ? 'Desfazer' : 'Não interessa' }}</button>
-        <button class="icon-button" aria-label="Ver detalhes" title="Ver detalhes" @click="emit('select', item)">→</button>
+        <span v-if="item.inKanban" class="saved-label">No kanban</span>
+        <button v-else class="btn btn-ghost btn-small" type="button" aria-label="Adicionar ao kanban" @click="emit('add', item)">+ Kanban</button>
+        <button class="row-icon" type="button" :class="{ selected: item.favorite }" :aria-pressed="item.favorite" :aria-label="item.favorite ? 'Remover dos favoritos' : 'Favoritar'" :title="item.favorite ? 'Remover dos favoritos' : 'Favoritar'" @click="emit('feedback', item, item.favorite ? null : 'FAVORITED')">{{ item.favorite ? '★' : '☆' }}</button>
+        <button class="row-icon" type="button" :aria-label="item.notRelevant ? 'Mostrar novamente' : 'Não interessa'" :title="item.notRelevant ? 'Mostrar novamente' : 'Não interessa'" @click="emit('feedback', item, item.notRelevant ? null : 'NOT_RELEVANT')">✕</button>
       </div>
     </article>
   </div>

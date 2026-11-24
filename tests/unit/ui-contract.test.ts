@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 describe('contrato visual do SaaS', () => {
   it('oferece catálogo, kanban e autenticação em português', () => {
-    const home = readFileSync('app/pages/index.vue', 'utf8');
+    const home = readFileSync('app/pages/index.vue', 'utf8') + readFileSync('app/composables/useOpportunityWorkspace.ts', 'utf8');
     const catalog = readFileSync('app/components/OpportunityCatalog.vue', 'utf8');
     const details = readFileSync('app/components/OpportunityDetails.vue', 'utf8');
     const plans = readFileSync('app/components/BillingPlans.vue', 'utf8');

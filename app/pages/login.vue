@@ -36,8 +36,8 @@ function getApiError(error: unknown, fallback: string) {
 
       <div class="auth-intro-content">
         <span class="auth-kicker">Seu radar de oportunidades</span>
-        <h1>Menos busca.<br><em>Mais decisão.</em></h1>
-        <p>Encontre licitações aderentes, entenda o score e organize o próximo passo da sua empresa em um só lugar.</p>
+        <h1>Licitações públicas, filtradas para a sua empresa.</h1>
+        <p>O AptaGov busca no PNCP todos os dias e mostra só o que combina com o que você vende.</p>
 
         <ul class="auth-benefit-list">
           <li><span class="auth-benefit-number">01</span><span><strong>Descobrir</strong><small>Catálogo do PNCP filtrado para o seu mercado</small></span></li>
