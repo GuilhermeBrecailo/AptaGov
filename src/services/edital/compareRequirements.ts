@@ -72,11 +72,18 @@ function brDateTime(value: string): string {
 }
 
 function evaluateRegistration(req: ExtractedRequirement, ctx: Context): Evaluation {
-  const councilLabel = req.council ?? 'conselho profissional';
-  const required = `Registro no ${councilLabel}`;
-  const registrations = ctx.profile.registrations.filter((item) => !req.council || item.council === req.council);
+  if (req.council === null) {
+    return {
+      status: 'check',
+      required: 'Registro no conselho profissional',
+      companyValue: null,
+      note: 'Edital não especifica o conselho — confira qual registro é exigido (CREA ou CAU).'
+    };
+  }
+  const required = `Registro no ${req.council}`;
+  const registrations = ctx.profile.registrations.filter((item) => item.council === req.council);
   if (registrations.length === 0) {
-    return { status: 'fail', required, companyValue: null, note: `Nenhum registro no ${councilLabel} cadastrado no perfil técnico.` };
+    return { status: 'fail', required, companyValue: null, note: `Nenhum registro no ${req.council} cadastrado no perfil técnico.` };
   }
   const today = ctx.now.toISOString().slice(0, 10);
   const describe = (item: (typeof registrations)[number], day: string | null) =>
@@ -118,6 +125,9 @@ function evaluateAttestations(req: ExtractedRequirement, ctx: Context): Evaluati
   if (req.minQuantity === null || !req.unit) {
     return { status: 'check', required, companyValue: null, note: 'O edital não informa quantidade mínima reconhecível — confira o trecho.' };
   }
+  if (req.minQuantity <= 0) {
+    return { status: 'check', required, companyValue: null, note: 'Quantidade mínima lida do edital parece implausível — confira o trecho.' };
+  }
   if (requiredUnit === null) {
     return { status: 'check', required, companyValue: null, note: `Unidade "${req.unit}" não reconhecida para comparação automática — confira o trecho.` };
   }
@@ -149,9 +159,15 @@ function evaluateAmount(req: ExtractedRequirement, ctx: Context): Evaluation {
   let trusted = true;
   let note = '';
   if (req.amountCents !== null) {
+    if (req.amountCents <= 0) {
+      return { status: 'check', required: `${label} mínimo`, companyValue, note: 'Valor exigido lido do edital parece implausível — confira o trecho.' };
+    }
     requiredCents = req.amountCents;
   } else if (req.percentOfEstimate !== null) {
     const percent = `${numberFormat.format(req.percentOfEstimate)}%`;
+    if (req.percentOfEstimate < 1 || req.percentOfEstimate > 100) {
+      return { status: 'check', required: `${percent} do valor estimado`, companyValue, note: `O percentual de ${percent} lido do edital parece implausível — confira o trecho.` };
+    }
     if (!ctx.estimate) {
       return { status: 'check', required: `${percent} do valor estimado`, companyValue, note: 'Valor estimado da contratação não disponível — confira o valor exigido no edital.' };
     }
@@ -176,6 +192,9 @@ function evaluateRatio(req: ExtractedRequirement, ctx: Context): Evaluation {
     return { status: 'check', required: 'Índice contábil', companyValue: null, note: 'Índice não comparável automaticamente — confira a exigência no trecho do edital.' };
   }
   const required = `${req.ratioName} ≥ ${ratioFormat.format(req.minRatio)}`;
+  if (req.minRatio <= 0) {
+    return { status: 'check', required, companyValue: null, note: 'Índice mínimo lido do edital parece implausível — confira o trecho.' };
+  }
   const { liquidityGeneral, solvencyGeneral, liquidityCurrent, balanceSheetDate } = ctx.profile.financial;
   const value = { LG: liquidityGeneral, SG: solvencyGeneral, LC: liquidityCurrent }[req.ratioName];
   if (value === null) {
@@ -289,15 +308,30 @@ function judgeLot(lotId: string | null, requirements: ExtractedRequirement[], ch
       }
     }
   }
+  // A failed optional requirement never makes the lot NOT_APT, but it must not vanish into APT either.
   const failCount = units.filter((unit) => unit.status === 'fail' && unit.mandatory).length;
-  const checkCount = units.filter((unit) => unit.status === 'check' && !unit.informative).length;
+  const checkCount = units.filter(
+    (unit) => (unit.status === 'check' && !unit.informative) || (unit.status === 'fail' && !unit.mandatory)
+  ).length;
+  requirements.forEach((req, index) => {
+    const check = checks[index]!;
+    if (req.alternativeGroup === null && !req.mandatory && check.status === 'fail') {
+      check.note = `${check.note} Exigência facultativa não atendida — confira se ela afeta sua participação.`.trim();
+    }
+  });
   const verdict = failCount > 0 ? 'NOT_APT' : checkCount > 0 ? 'CHECK' : 'APT';
   return { lotId, verdict, failCount, checkCount, checks };
 }
 
+/**
+ * The opportunity value (from PNCP) is trusted only when the edital has at most one lot; lot and summary
+ * values are read by the AI, so percentage requirements based on them never go beyond `check`.
+ */
 function resolveEstimate(lotCents: number | null, input: CompareInput): Estimate {
-  if (lotCents !== null && lotCents > 0) return { cents: lotCents, trusted: true };
-  if (input.opportunityEstimatedValueCents > 0) return { cents: input.opportunityEstimatedValueCents, trusted: true };
+  const lotCount = input.extraction.summary.lots.length;
+  if (lotCount <= 1 && input.opportunityEstimatedValueCents > 0) return { cents: input.opportunityEstimatedValueCents, trusted: true };
+  if (lotCents !== null && lotCents > 0) return { cents: lotCents, trusted: false };
+  if (lotCount > 1) return null;
   const summaryCents = input.extraction.summary.estimatedValueCents;
   if (summaryCents !== null && summaryCents > 0) return { cents: summaryCents, trusted: false };
   return null;

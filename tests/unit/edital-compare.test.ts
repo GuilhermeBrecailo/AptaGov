@@ -223,4 +223,124 @@ describe('compareRequirements', () => {
     expect(only(result, 'lg').status).toBe('check');
     expect(result[0]!.verdict).toBe('CHECK');
   });
+
+  describe('correções da revisão', () => {
+    const financial = (overrides: Partial<CompanyProfile['financial']>) => ({ ...emptyCompanyProfile().financial, ...overrides });
+    const twoLots = (estimateA: number | null) => [
+      { id: 'A', object: 'Lote A', estimatedValueCents: estimateA },
+      { id: 'B', object: 'Lote B', estimatedValueCents: null }
+    ];
+
+    it('valor estimado do lote (lido pela IA) não é confiável: PL percentual vira check', () => {
+      const ext = extraction([requirement({ id: 'pl', lot: 'A', category: 'net_worth', percentOfEstimate: 10 })], { lots: twoLots(100_000_000) });
+      const result = compare(ext, profile({ financial: financial({ netWorthCents: 12_000_000 }) }), 500_000_000);
+      const check = result[0]!.checks.find((item) => item.requirementId === 'pl')!;
+      expect(check.status).toBe('check');
+      expect(check.required).toBe('R$ 100.000,00');
+      expect(check.note).toContain('valor estimado lido do edital');
+      expect(result[0]!.verdict).toBe('CHECK');
+    });
+
+    it('com um único lote, o valor estimado da oportunidade é usado como confiável', () => {
+      const ext = extraction([requirement({ id: 'pl', category: 'net_worth', percentOfEstimate: 10 })], {
+        lots: [{ id: 'A', object: 'Lote único', estimatedValueCents: 50_000_000 }]
+      });
+      const check = only(compare(ext, profile({ financial: financial({ netWorthCents: 12_000_000 }) }), 100_000_000), 'pl');
+      expect(check.status).toBe('ok');
+      expect(check.required).toBe('R$ 100.000,00');
+    });
+
+    it('fail em exigência facultativa conta como check: veredito CHECK, nunca APT nem NOT_APT', () => {
+      const ext = extraction([area({ mandatory: false })], { matches: [match('a1', 'at1')] });
+      const result = compare(ext, profile({ attestations: [attestation('at1', 100, 'm2')] }));
+      expect(only(result, 'a1').status).toBe('fail');
+      expect(result[0]).toMatchObject({ verdict: 'CHECK', failCount: 0, checkCount: 1 });
+    });
+
+    it('registro sem conselho especificado no edital → check', () => {
+      const ext = extraction([requirement({ id: 'r1', category: 'professional_registration', council: null })]);
+      const check = only(compare(ext, profile({ registrations: [{ council: 'CREA', number: '1', state: 'PR', validUntil: '2027-06-30' }] })), 'r1');
+      expect(check.status).toBe('check');
+      expect(check.note).toContain('Edital não especifica o conselho');
+    });
+
+    it.each([
+      ['percentual < 1%', requirement({ id: 'x', category: 'net_worth', percentOfEstimate: 0.5 })],
+      ['percentual ≤ 0', requirement({ id: 'x', category: 'net_worth', percentOfEstimate: 0 })],
+      ['percentual > 100%', requirement({ id: 'x', category: 'share_capital', percentOfEstimate: 150 })],
+      ['amountCents ≤ 0', requirement({ id: 'x', category: 'net_worth', amountCents: 0 })],
+      ['minQuantity ≤ 0', requirement({ id: 'x', category: 'technical_capacity_company', minQuantity: 0, unit: 'm2', allowsSum: true })],
+      ['minRatio ≤ 0', requirement({ id: 'x', category: 'financial_ratios', ratioName: 'LG', minRatio: 0 })]
+    ])('limiar implausível da IA (%s) → check com nota', (_label, req) => {
+      const prof = profile({
+        attestations: [attestation('at1', 5000, 'm2')],
+        financial: financial({ ...freshBalance, netWorthCents: 999_999_999_00, shareCapitalCents: 999_999_999_00, liquidityGeneral: 5 })
+      });
+      const check = only(compare(extraction([req], { matches: [match('x', 'at1')] }), prof, 100_000_000), 'x');
+      expect(check.status).toBe('check');
+      expect(check.note).toContain('implausível');
+    });
+
+    it('registro sem data de validade → check', () => {
+      const result = compare(extraction([crea]), profile({ registrations: [{ council: 'CREA', number: '1', state: 'PR', validUntil: null }] }));
+      expect(only(result, 'r1').status).toBe('check');
+      expect(only(result, 'r1').note).toContain('sem data de validade');
+    });
+
+    it('capacidade técnico-profissional usa os atestados relacionados', () => {
+      const ext = extraction([area({ category: 'technical_capacity_professional', minQuantity: 300 })], { matches: [match('a1', 'at1')] });
+      const check = only(compare(ext, profile({ attestations: [attestation('at1', 400, 'm²')] })), 'a1');
+      expect(check.status).toBe('ok');
+      expect(check.category).toBe('technical_capacity_professional');
+    });
+
+    it('exigência ligada a lote inexistente entra em todos os lotes como check', () => {
+      const ext = extraction([area({ lot: 'Z', minQuantity: 10 })], { lots: twoLots(null), matches: [match('a1', 'at1')] });
+      const result = compare(ext, profile({ attestations: [attestation('at1', 1000, 'm2')] }));
+      expect(result.map((lot) => [lot.lotId, lot.verdict, lot.checks[0]?.status])).toEqual([
+        ['A', 'CHECK', 'check'],
+        ['B', 'CHECK', 'check']
+      ]);
+      expect(result[0]!.checks[0]!.note).toContain('lote não identificado');
+    });
+
+    it('allowsSum: null e só a soma atinge o mínimo → check', () => {
+      const ext = extraction([area({ allowsSum: null })], { matches: [match('a1', 'at1'), match('a1', 'at2')] });
+      const check = only(compare(ext, profile({ attestations: [attestation('at1', 800, 'm2'), attestation('at2', 900, 'm2')] })), 'a1');
+      expect(check.status).toBe('check');
+      expect(check.companyValue).toBe('900 m²');
+    });
+
+    it('atestados com unidades mistas abaixo do mínimo → check', () => {
+      const ext = extraction([area()], { matches: [match('a1', 'at1'), match('a1', 'at2')] });
+      const check = only(compare(ext, profile({ attestations: [attestation('at1', 800, 'm2'), attestation('at2', 900, 'm³')] })), 'a1');
+      expect(check.status).toBe('check');
+      expect(check.companyValue).toBe('800 m²');
+    });
+
+    it('balanço com mais de 16 meses → check', () => {
+      const ext = extraction([requirement({ id: 'lg', category: 'financial_ratios', ratioName: 'LG', minRatio: 1 })]);
+      const check = only(compare(ext, profile({ financial: financial({ balanceSheetDate: '2025-06-30', liquidityGeneral: 2 }) })), 'lg');
+      expect(check.status).toBe('check');
+      expect(check.note).toContain('mais de 16 meses');
+    });
+
+    it('índice com ratioName: null → check, sem comparação numérica', () => {
+      const ext = extraction([requirement({ id: 'ge', category: 'financial_ratios', ratioName: null, minRatio: 0.5 })]);
+      const result = compare(ext, profile({ financial: financial({ ...freshBalance, liquidityGeneral: 2, solvencyGeneral: 2, liquidityCurrent: 2 }) }));
+      expect(only(result, 'ge').status).toBe('check');
+      expect(result[0]!.verdict).toBe('CHECK');
+    });
+
+    it('grupo alternativo com check + fail → check e veredito CHECK', () => {
+      const ext = extraction([
+        requirement({ id: 'lg', category: 'financial_ratios', ratioName: 'LG', minRatio: 1, alternativeGroup: 'g1' }),
+        requirement({ id: 'pl', category: 'net_worth', percentOfEstimate: 10, alternativeGroup: 'g1' })
+      ]);
+      const result = compare(ext, profile({ financial: financial({ ...freshBalance, liquidityGeneral: 0.9 }) }), 100_000_000);
+      expect(only(result, 'lg').status).toBe('fail');
+      expect(only(result, 'pl').status).toBe('check');
+      expect(result[0]).toMatchObject({ verdict: 'CHECK', failCount: 0, checkCount: 1 });
+    });
+  });
 });
