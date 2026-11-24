@@ -171,6 +171,27 @@ describe('ClaudeEditalExtractor', () => {
     expect(text).toContain('conditional');
   });
 
+  it('instructs that compound alternatives (AND inside OR) are conditional, not grouped', async () => {
+    const { client, calls } = fakeClient(message());
+    await new ClaudeEditalExtractor({ client, model: MODEL }).extract(input);
+    const content = (calls[0] as { messages: Array<{ content: Array<{ text?: string }> }> }).messages[0]!.content;
+    const text = content.at(-1)!.text!;
+    expect(text).toContain('Alternativa composta (E dentro de OU)');
+    expect(text).toMatch(/NÃO use "alternativeGroup"; marque todas as exigências envolvidas com "conditional": true/);
+    expect(text).toContain('use somente quando cada lado da alternativa for UMA única exigência');
+    expect(text).not.toContain('patrimônio líquido mínimo de 10% OU índices');
+  });
+
+  it('instructs that other ratios or maximum ratios get ratioName null and conditional true', async () => {
+    const { client, calls } = fakeClient(message());
+    await new ClaudeEditalExtractor({ client, model: MODEL }).extract(input);
+    const content = (calls[0] as { messages: Array<{ content: Array<{ text?: string }> }> }).messages[0]!.content;
+    const text = content.at(-1)!.text!;
+    expect(text).toContain('qualquer índice que não seja LG, SG ou LC');
+    expect(text).toContain('valor MÁXIMO');
+    expect(text).toMatch(/"ratioName": null, "minRatio": null e "conditional": true/);
+  });
+
   it('uses only text after the last fallback block', async () => {
     const response = message();
     response.content = [
