@@ -30,7 +30,7 @@ export const attestationSchema = z.object({
 });
 
 export const financialSchema = z.object({
-  netWorthCents: nonNegative,
+  netWorthCents: z.number().int().nullable(),
   shareCapitalCents: nonNegative,
   liquidityGeneral: nonNegative,
   solvencyGeneral: nonNegative,

@@ -53,4 +53,11 @@ describe('company profile', () => {
     expect(() => handleCompanyProfilePut({ db, organizationId: id, body: { ...emptyCompanyProfile(), attestations: [{ ...attestation, quantity: -1 }] } }))
       .toThrowError(expect.objectContaining({ statusCode: 400, statusMessage: 'Perfil inválido' }));
   });
+
+  it('accepts negative net worth', () => {
+    const db = createTestDatabase();
+    const id = org(db);
+    const body = { ...emptyCompanyProfile(), financial: { ...emptyCompanyProfile().financial, netWorthCents: -500000 } };
+    expect(handleCompanyProfilePut({ db, organizationId: id, body }).financial.netWorthCents).toBe(-500000);
+  });
 });
