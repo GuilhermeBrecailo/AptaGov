@@ -81,7 +81,11 @@ export interface WorkerRuntimeDependencies {
   healthChecks?: Partial<Record<WorkerStage, () => boolean | Promise<boolean>>>;
   notificationHealthChecks?: Partial<Record<'email' | 'push', () => boolean | Promise<boolean>>>;
   workerId?: string;
+  /** Quantas licitações gravadas disparam uma classificação parcial durante a sincronização. */
+  progressiveClassificationBatch?: number;
 }
+
+const DEFAULT_PROGRESSIVE_CLASSIFICATION_BATCH = 200;
 
 interface SourceJobPayload {
   organizationId: number;
@@ -141,6 +145,7 @@ export class WorkerRuntime {
   private readonly healthChecks: Partial<Record<WorkerStage, () => boolean | Promise<boolean>>>;
   private readonly notificationHealthChecks: Partial<Record<'email' | 'push', () => boolean | Promise<boolean>>>;
   private readonly workerId: string;
+  private readonly progressiveClassificationBatch: number;
   private readonly outbox: OperationalOutboxRepository;
   private readonly metricsRepository: WorkerMetricsRepository;
   private lastMetrics: WorkerCycleMetrics | null = null;
@@ -158,6 +163,7 @@ export class WorkerRuntime {
     this.healthChecks = dependencies.healthChecks ?? {};
     this.notificationHealthChecks = dependencies.notificationHealthChecks ?? {};
     this.workerId = dependencies.workerId ?? `worker:${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+    this.progressiveClassificationBatch = Math.max(1, dependencies.progressiveClassificationBatch ?? DEFAULT_PROGRESSIVE_CLASSIFICATION_BATCH);
     this.opportunities = new OpportunityRepository(this.db);
     this.jobs = new JobRepository(this.db);
     this.systemState = new SystemStateRepository(this.db);
@@ -535,6 +541,14 @@ export class WorkerRuntime {
     if (!this.jobs.claim(job.id, owner, this.env.workerLeaseMs, { organizationId: payload.organizationId, radarId: payload.radarId })) {
       return { received: 0, created: 0, updated: 0, entries: [] };
     }
+    // A primeira sincronização pode levar muitos minutos; sem isto, tudo
+    // aparece com score 0 até o fim do ciclo. Pontua em lotes durante a busca.
+    let entriesSinceClassification = 0;
+    const classifyProgress = async () => {
+      entriesSinceClassification = 0;
+      const filters = this.organizationFilters.find(payload.organizationId) ?? payload.filters;
+      await classifyOrganizationOpportunities(this.opportunities, payload.organizationId, filters, { onlyUnclassified: true });
+    };
     try {
       const result = await this.withLeaseHeartbeat(job.id, owner, () => this.sourceSyncService.run({
           filters: payload.filters,
@@ -544,6 +558,10 @@ export class WorkerRuntime {
            scopeKey: payload.scopeKey ?? sourceScopeKey(payload.organizationId, payload.radarId),
            skipSources: pausedSources.size > 0 ? pausedSources : undefined,
            throwOnAllFailed: false,
+           onEntry: async () => {
+             entriesSinceClassification += 1;
+             if (entriesSinceClassification >= this.progressiveClassificationBatch) await classifyProgress();
+           },
          }));
       const sourceResults = result.sourceResults.map(sourceMetric);
       this.jobs.updateCheckpoint(job.id, { sourceResults }, owner);
