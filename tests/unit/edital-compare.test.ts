@@ -188,13 +188,39 @@ describe('compareRequirements', () => {
   });
 
   it('visita técnica com prazo → check informativo; veredito continua APT', () => {
-    const ext = extraction([requirement({ id: 'vt', category: 'technical_visit', deadline: '2026-12-10T10:00:00-03:00' })]);
-    const result = compare(ext, profile());
+    const ext = extraction([crea, requirement({ id: 'vt', category: 'technical_visit', deadline: '2026-12-10T10:00:00-03:00' })]);
+    const result = compare(ext, profile({ registrations: [{ council: 'CREA', number: '123', state: 'PR', validUntil: '2027-06-30' }] }));
     const check = only(result, 'vt');
     expect(check.status).toBe('check');
     expect(check.informative).toBe(true);
     expect(check.deadline).toBe('2026-12-10T10:00:00-03:00');
     expect(result[0]!.verdict).toBe('APT');
+  });
+
+  it.each([
+    ['nenhuma exigência', []],
+    ['só exigências informativas', [requirement({ id: 'vt', category: 'technical_visit' }), requirement({ id: 'gp', category: 'bid_guarantee' })]]
+  ])('lote com %s → CHECK com item sintético, nunca APT', (_label, requirements) => {
+    const result = compare(extraction(requirements), profile());
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ verdict: 'CHECK', failCount: 0, checkCount: 1 });
+    const synthetic = result[0]!.checks.find((check) => check.description === 'Nenhuma exigência de habilitação encontrada — confira o edital');
+    expect(synthetic).toMatchObject({ status: 'check', informative: false });
+  });
+
+  it('lote sem exigências próprias em edital com vários lotes também vira CHECK', () => {
+    const ext = extraction([area({ id: 'a1', lot: 'A', minQuantity: 500 })], {
+      lots: [
+        { id: 'A', object: 'Lote A', estimatedValueCents: null },
+        { id: 'B', object: 'Lote B', estimatedValueCents: null }
+      ],
+      matches: [match('a1', 'at1')]
+    });
+    const result = compare(ext, profile({ attestations: [attestation('at1', 1000, 'm2')] }));
+    expect(result.map((lot) => [lot.lotId, lot.verdict])).toEqual([
+      ['A', 'APT'],
+      ['B', 'CHECK']
+    ]);
   });
 
   it('dois lotes com mínimos 500 e 3.000 m² e atestado de 1.000 m² → lote A APT, lote B NOT_APT', () => {
@@ -287,11 +313,42 @@ describe('compareRequirements', () => {
       expect(only(result, 'r1').note).toContain('sem data de validade');
     });
 
-    it('capacidade técnico-profissional usa os atestados relacionados', () => {
-      const ext = extraction([area({ category: 'technical_capacity_professional', minQuantity: 300 })], { matches: [match('a1', 'at1')] });
-      const check = only(compare(ext, profile({ attestations: [attestation('at1', 400, 'm²')] })), 'a1');
+    const technician = { id: 't1', name: 'Ana', title: 'Engenheira civil', registrationNumber: 'CREA-PR 1' };
+    const withCat = (id: string, quantity: number, overrides: Partial<Attestation> = {}): Attestation =>
+      ({ ...attestation(id, quantity, 'm²'), catNumber: 'CAT 123/2024', technicianId: 't1', ...overrides });
+    const professional = () => extraction([area({ category: 'technical_capacity_professional', minQuantity: 300 })], { matches: [match('a1', 'at1')] });
+
+    it('capacidade técnico-profissional usa os atestados relacionados com CAT e responsável', () => {
+      const check = only(compare(professional(), profile({ technicians: [technician], attestations: [withCat('at1', 400)] })), 'a1');
       expect(check.status).toBe('ok');
       expect(check.category).toBe('technical_capacity_professional');
+    });
+
+    it.each([
+      ['sem CAT', withCat('at1', 400, { catNumber: null })],
+      ['CAT em branco', withCat('at1', 400, { catNumber: '  ' })],
+      ['sem responsável', withCat('at1', 400, { technicianId: null })],
+      ['responsável inexistente no perfil', withCat('at1', 400, { technicianId: 'outro' })]
+    ])('capacidade técnico-profissional com atestado %s → check pedindo a CAT', (_label, item) => {
+      const result = compare(professional(), profile({ technicians: [technician], attestations: [item] }));
+      const check = only(result, 'a1');
+      expect(check.status).toBe('check');
+      expect(check.note).toBe('Exige CAT do responsável técnico — vincule a CAT e o responsável no perfil');
+      expect(result[0]!.verdict).toBe('CHECK');
+    });
+
+    it('capacidade técnico-profissional conta só os atestados com CAT e responsável; abaixo do mínimo com outros sem CAT → check', () => {
+      const ext = extraction([area({ category: 'technical_capacity_professional', minQuantity: 300 })], { matches: [match('a1', 'at1'), match('a1', 'at2')] });
+      const check = only(compare(ext, profile({ technicians: [technician], attestations: [withCat('at1', 200), withCat('at2', 200, { catNumber: null })] })), 'a1');
+      expect(check.status).toBe('check');
+      expect(check.companyValue).toBe('200 m²');
+      expect(check.note).toContain('Exige CAT do responsável técnico — vincule a CAT e o responsável no perfil');
+    });
+
+    it('capacidade técnico-profissional: atestado sem CAT não completa o mínimo do atestado com CAT', () => {
+      const ext = extraction([area({ category: 'technical_capacity_professional', minQuantity: 300 })], { matches: [match('a1', 'at1'), match('a1', 'at2')] });
+      const check = only(compare(ext, profile({ technicians: [technician], attestations: [withCat('at1', 200), withCat('at2', 200, { technicianId: null })] })), 'a1');
+      expect(check.status).not.toBe('ok');
     });
 
     it('exigência ligada a lote inexistente entra em todos os lotes como check', () => {

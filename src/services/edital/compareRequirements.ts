@@ -48,6 +48,8 @@ type Context = {
 const BALANCE_SHEET_MAX_AGE_MONTHS = 16;
 const INFORMATIVE: ReadonlySet<RequirementCategory> = new Set(['technical_visit', 'bid_guarantee']);
 const COUNTED_CONFIDENCE: ReadonlySet<ExtractedMatch['confidence']> = new Set(['high', 'medium']);
+const MISSING_CAT = 'Exige CAT do responsável técnico — vincule a CAT e o responsável no perfil';
+const NO_REQUIREMENTS = 'Nenhuma exigência de habilitação encontrada — confira o edital';
 
 const moneyFormat = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const numberFormat = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 });
@@ -117,9 +119,18 @@ function evaluateAttestations(req: ExtractedRequirement, ctx: Context): Evaluati
   const relatedIds = new Set(
     ctx.matches.filter((item) => item.requirementId === req.id && COUNTED_CONFIDENCE.has(item.confidence)).map((item) => item.attestationId)
   );
-  const related = ctx.profile.attestations.filter((item) => relatedIds.has(item.id));
+  let related = ctx.profile.attestations.filter((item) => relatedIds.has(item.id));
   if (related.length === 0) {
     return { status: 'check', required, companyValue: null, note: 'a IA não encontrou atestado equivalente — confira seus atestados com o trecho do edital.' };
+  }
+  // Professional capacity is proven by the CAT of a responsible technician, not by the company attestation alone.
+  let missingCat = false;
+  if (req.category === 'technical_capacity_professional') {
+    const technicianIds = new Set(ctx.profile.technicians.map((item) => item.id));
+    const qualified = related.filter((item) => Boolean(item.catNumber?.trim()) && item.technicianId !== null && technicianIds.has(item.technicianId));
+    if (qualified.length === 0) return { status: 'check', required, companyValue: null, note: MISSING_CAT };
+    missingCat = qualified.length < related.length;
+    related = qualified;
   }
   const requiredUnit = req.unit ? normalizeUnit(req.unit) : null;
   if (req.minQuantity === null || !req.unit) {
@@ -142,6 +153,9 @@ function evaluateAttestations(req: ExtractedRequirement, ctx: Context): Evaluati
   const companyValue = quantity(counted, req.unit);
   const basis = req.allowsSum === true ? 'Soma dos atestados relacionados.' : 'Maior atestado relacionado (o edital não permite somar).';
   if (counted >= req.minQuantity) return { status: 'ok', required, companyValue, note: basis };
+  if (missingCat) {
+    return { status: 'check', required, companyValue, note: `${basis} ${MISSING_CAT}` };
+  }
   if (incompatible > 0) {
     return { status: 'check', required, companyValue, note: `${basis} Há atestados relacionados em outra unidade — confira a equivalência.` };
   }
@@ -310,7 +324,7 @@ function judgeLot(lotId: string | null, requirements: ExtractedRequirement[], ch
   }
   // A failed optional requirement never makes the lot NOT_APT, but it must not vanish into APT either.
   const failCount = units.filter((unit) => unit.status === 'fail' && unit.mandatory).length;
-  const checkCount = units.filter(
+  let checkCount = units.filter(
     (unit) => (unit.status === 'check' && !unit.informative) || (unit.status === 'fail' && !unit.mandatory)
   ).length;
   requirements.forEach((req, index) => {
@@ -319,8 +333,53 @@ function judgeLot(lotId: string | null, requirements: ExtractedRequirement[], ch
       check.note = `${check.note} Exigência facultativa não atendida — confira se ela afeta sua participação.`.trim();
     }
   });
+  // A lot without any eliminating requirement means the extraction probably missed them: never call it APT.
+  if (checks.every((check) => check.informative)) {
+    checks.push({
+      requirementId: 'sem-exigencias',
+      category: 'other_elimination',
+      description: NO_REQUIREMENTS,
+      status: 'check',
+      informative: false,
+      required: 'Exigências de habilitação do edital',
+      companyValue: null,
+      note: 'A análise automática não encontrou exigências de habilitação para este lote — confira no edital.',
+      page: null,
+      excerpt: '',
+      deadline: null
+    });
+    checkCount += 1;
+  }
   const verdict = failCount > 0 ? 'NOT_APT' : checkCount > 0 ? 'CHECK' : 'APT';
   return { lotId, verdict, failCount, checkCount, checks };
+}
+
+/**
+ * Not every document was read (TR left out by size or format): requirements may be missing, so APT becomes CHECK
+ * and every lot gets a check item saying so.
+ */
+export function markPartial(lots: LotVerdict[]): LotVerdict[] {
+  return lots.map((lot) => ({
+    ...lot,
+    verdict: lot.verdict === 'APT' ? 'CHECK' : lot.verdict,
+    checkCount: lot.checkCount + 1,
+    checks: [
+      ...lot.checks,
+      {
+        requirementId: 'analise-parcial',
+        category: 'other_elimination',
+        description: 'Análise parcial: nem todos os documentos foram lidos',
+        status: 'check',
+        informative: false,
+        required: 'Leitura de todos os documentos do edital',
+        companyValue: null,
+        note: 'Exigências dos documentos não lidos podem ter ficado de fora — confira a lista de documentos e o edital.',
+        page: null,
+        excerpt: '',
+        deadline: null
+      }
+    ]
+  }));
 }
 
 /**

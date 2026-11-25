@@ -192,6 +192,14 @@ describe('ClaudeEditalExtractor', () => {
     expect(text).toMatch(/"ratioName": null, "minRatio": null e "conditional": true/);
   });
 
+  it('instructs that professional capacity means the CAT of the responsible engineer', async () => {
+    const { client, calls } = fakeClient(message());
+    await new ClaudeEditalExtractor({ client, model: MODEL }).extract(input);
+    const content = (calls[0] as { messages: Array<{ content: Array<{ text?: string }> }> }).messages[0]!.content;
+    expect(content.at(-1)!.text!).toContain('technical_capacity_professional');
+    expect(content.at(-1)!.text!).toMatch(/CAT \(Certidão de Acervo Técnico\) do responsável técnico/);
+  });
+
   it('uses only text after the last fallback block', async () => {
     const response = message();
     response.content = [

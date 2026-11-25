@@ -52,6 +52,7 @@ Para cada exigência:
 - "alternativeGroup": use somente quando cada lado da alternativa for UMA única exigência (ex.: patrimônio líquido mínimo de 10% do valor estimado OU capital social mínimo de 10% do valor estimado); dê o mesmo identificador de grupo às alternativas; caso contrário, null.
 - Alternativa composta (E dentro de OU): quando um lado da alternativa for formado por várias exigências que precisam ser cumpridas juntas (ex.: LG, SG e LC iguais ou superiores a 1 OU patrimônio líquido mínimo de 10%), NÃO use "alternativeGroup"; marque todas as exigências envolvidas com "conditional": true e "alternativeGroup": null.
 - "conditional": true quando a exigência depender de uma condição que você não consegue representar nos campos acima (ex.: só vale para determinada situação da empresa); caso contrário, false.
+- "technical_capacity_company" é a capacidade técnico-operacional (atestados em nome da empresa). "technical_capacity_professional" é a capacidade técnico-profissional: exige a CAT (Certidão de Acervo Técnico) do responsável técnico (engenheiro ou arquiteto) indicado pela empresa; use essa categoria somente quando o edital pedir a CAT ou o acervo do profissional.
 - "lot": identificador do lote a que se aplica (o mesmo usado em summary.lots) ou null quando vale para todos os lotes.
 - "id": identificador único e curto (ex.: "r1", "r2").
 
