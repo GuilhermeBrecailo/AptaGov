@@ -6,18 +6,36 @@ import { fitToBudget, parsePncpId, PncpDocumentClient, selectDocuments } from '.
 import { ClaudeEditalExtractor, estimateCostUsdMicros } from '../src/services/edital/claudeExtractor';
 import { compareRequirements } from '../src/services/edital/compareRequirements';
 
-// Uso: npm run e2e:edital -- <pncp_id> [perfil.json]
+// Uso: npm run e2e:edital -- <pncp_id> [perfil.json] [--valor-estimado=<reais>]
+// --valor-estimado: valor estimado da contratacao em reais (ex.: 1250000.50), como a oportunidade no PNCP; sem ele, exigencias em percentual ficam para conferir.
 // ATENCAO: chama a API real da Anthropic e GERA CUSTO. Nao grava em banco algum.
-const env = loadEnv();
-const [pncpId, profilePath] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const valueArg = args.find((arg) => arg.startsWith('--valor-estimado='));
+const [pncpId, profilePath] = args.filter((arg) => !arg.startsWith('--'));
 
 function fail(message: string): never {
   console.error(`E2E edital: ${message}`);
   process.exit(1);
 }
 
+let env: ReturnType<typeof loadEnv>;
+try {
+  env = loadEnv();
+} catch (error) {
+  fail(`configuração de ambiente inválida: ${error instanceof Error ? error.message : 'erro desconhecido'}`);
+}
+
 if (!env.anthropicApiKey) fail('ANTHROPIC_API_KEY está vazia. Este script chama a API real e gera custo; defina a chave no .env e rode de novo.');
-if (!pncpId || !parsePncpId(pncpId)) fail('informe o pncp_id no formato 00000000000000-1-000000/2026. Uso: npm run e2e:edital -- <pncp_id> [perfil.json]');
+if (!pncpId || !parsePncpId(pncpId)) fail('informe o pncp_id no formato 00000000000000-1-000000/2026. Uso: npm run e2e:edital -- <pncp_id> [perfil.json] [--valor-estimado=<reais>]');
+
+let estimatedValueCents = 0;
+if (valueArg) {
+  const reais = Number(valueArg.slice('--valor-estimado='.length).replace(',', '.'));
+  if (!Number.isFinite(reais) || reais <= 0) fail('--valor-estimado deve ser um número positivo em reais (ex.: 1250000.50).');
+  estimatedValueCents = Math.round(reais * 100);
+} else {
+  console.log('Nota: sem --valor-estimado, exigências em percentual do valor estimado ficarão para conferir (⚠️).');
+}
 
 let profile: CompanyProfile = emptyCompanyProfile();
 if (profilePath) {
@@ -42,7 +60,7 @@ try {
     documents: included.map((doc) => ({ kind: doc.kind, title: doc.title, data: doc.data })),
     profile
   });
-  const verdicts = compareRequirements({ extraction: result.extraction, profile, opportunityEstimatedValueCents: 0, now: new Date() });
+  const verdicts = compareRequirements({ extraction: result.extraction, profile, opportunityEstimatedValueCents: estimatedValueCents, now: new Date() });
 
   for (const lot of verdicts) {
     console.log(`\nLote ${lot.lotId ?? '(único)'}: ${lot.verdict} (${lot.failCount} falhas, ${lot.checkCount} a conferir)`);
