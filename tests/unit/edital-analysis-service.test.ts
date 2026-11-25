@@ -288,6 +288,24 @@ describe('EditalAnalysisService', () => {
       .toMatchObject({ status: 'check', informative: false });
   });
 
+  it('TR com link fora do PNCP fica de fora (parcial) e o fetch não é chamado para ele', async () => {
+    const files: FileEntry[] = [
+      { sequencialDocumento: 1, tipoDocumentoNome: 'Edital', titulo: 'edital.pdf', url: 'https://pncp.gov.br/pncp-api/v1/files/1' },
+      { sequencialDocumento: 2, tipoDocumentoNome: 'Termo de Referência', titulo: 'tr.pdf', url: 'https://evil.example/tr.pdf' }
+    ];
+    disableScheduling();
+    const { service, repository, organizationId, opportunityId, fetchMock, extractor } = setup({ files });
+    const record = service.start(organizationId, opportunityId);
+    await service.run(record.id);
+
+    const done = repository.latest(organizationId, opportunityId, NOW)!;
+    expect(done.status).toBe('COMPLETED');
+    expect(done.partial).toBe(true);
+    expect(done.documents[1]).toMatchObject({ kind: 'TERMO_REFERENCIA', included: false, reason: 'Link fora do PNCP' });
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).not.toContain('https://evil.example/tr.pdf');
+    expect((extractor as FakeExtractor).calls[0]!.documents.map((doc) => doc.kind)).toEqual(['EDITAL']);
+  });
+
   it('documentos que não cabem no orçamento nunca chamam o extrator com zero documentos', async () => {
     disableScheduling();
     const big = Buffer.alloc(25 * MB);

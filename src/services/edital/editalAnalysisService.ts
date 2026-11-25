@@ -19,6 +19,7 @@ import {
   PncpHttpError,
   selectDocuments,
   UnsupportedDocumentError,
+  UntrustedDocumentUrlError,
   type PncpDocumentClient,
   type PncpFile,
   type SelectedDocument
@@ -51,6 +52,7 @@ const GENERIC_FAILURE = 'Falha ao analisar o edital. Tente novamente mais tarde.
 const REASON_SUPERSEDED = 'Versão anterior';
 const REASON_UNSUPPORTED = 'Formato não suportado';
 const REASON_TOO_LARGE = 'Excede o limite de tamanho';
+const REASON_UNTRUSTED = 'Link fora do PNCP';
 
 type Downloaded = SelectedDocument & { bytes: number; data: Buffer };
 
@@ -148,29 +150,38 @@ export class EditalAnalysisService {
       }
       const supersededEntries = superseded.map((file) => documentEntry({ ...file, kind: supersededKind(file) }, REASON_SUPERSEDED));
 
-      const unsupported = new Set<SelectedDocument>(selected.filter((doc) => !doc.supported));
+      // Documents left out before the budget step, with the reason shown to the user.
+      const skipped = new Map<SelectedDocument, string>(selected.filter((doc) => !doc.supported).map((doc) => [doc, REASON_UNSUPPORTED]));
+      const entriesWith = (included: Set<string>): EditalAnalysisDocument[] => [
+        ...selected.map((doc) => documentEntry(doc, skipped.get(doc) ?? (included.has(doc.url) ? null : REASON_TOO_LARGE))),
+        ...supersededEntries
+      ];
+
       const downloaded: Downloaded[] = [];
       for (const doc of selected) {
-        if (unsupported.has(doc)) continue;
+        if (skipped.has(doc)) continue;
         try {
           const data = await this.documents.download(doc.url);
           downloaded.push({ ...doc, bytes: data.length, data });
         } catch (error) {
-          if (!(error instanceof UnsupportedDocumentError)) throw error;
-          unsupported.add(doc);
+          if (error instanceof UnsupportedDocumentError) skipped.set(doc, REASON_UNSUPPORTED);
+          else if (error instanceof UntrustedDocumentUrlError) skipped.set(doc, REASON_UNTRUSTED);
+          else if (error instanceof DocumentTooLargeError) {
+            skipped.set(doc, REASON_TOO_LARGE);
+            // Edital alone over the limit: spec decision 6 says the analysis fails.
+            if (doc.kind === 'EDITAL') {
+              documents = entriesWith(new Set());
+              throw error;
+            }
+          } else throw error;
         }
       }
 
-      const entriesWith = (included: Set<string>): EditalAnalysisDocument[] => [
-        ...selected.map((doc) => documentEntry(
-          doc,
-          unsupported.has(doc) ? REASON_UNSUPPORTED : included.has(doc.url) ? null : REASON_TOO_LARGE
-        )),
-        ...supersededEntries
-      ];
-
       if (downloaded.length === 0) {
         documents = entriesWith(new Set());
+        const reasons = new Set(skipped.values());
+        if (reasons.has(REASON_TOO_LARGE)) throw new DocumentTooLargeError();
+        if (reasons.has(REASON_UNTRUSTED) && !reasons.has(REASON_UNSUPPORTED)) throw new UntrustedDocumentUrlError();
         this.analyses.fail(recordId, UNSUPPORTED, documents, this.now());
         return;
       }
@@ -195,7 +206,7 @@ export class EditalAnalysisService {
       this.analyses.complete(recordId, {
         profileHash: profileHash(profile),
         documents,
-        partial: budget.partial || unsupported.size > 0,
+        partial: budget.partial || skipped.size > 0,
         model: result.model,
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
@@ -239,7 +250,8 @@ export class EditalAnalysisService {
   private recordFailure(recordId: string, error: unknown, documents: EditalAnalysisDocument[] | undefined): void {
     const known = error instanceof ExtractionFailedError
       || error instanceof UnsupportedDocumentError
-      || error instanceof DocumentTooLargeError;
+      || error instanceof DocumentTooLargeError
+      || error instanceof UntrustedDocumentUrlError;
     if (!known) {
       logger.error({ analysisId: recordId, error: redactLogData(error) }, 'Edital analysis failed');
     }
