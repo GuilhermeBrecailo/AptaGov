@@ -335,3 +335,96 @@ export const kanbanColumns: Array<{ state: KanbanState; label: string }> = [
   { state: 'LOST', label: 'Perdidas' },
   { state: 'DISCARDED', label: 'Descartadas' },
 ];
+
+// Análise de edital e perfil técnico (espelha o contrato da API; valores monetários em centavos)
+export type CheckStatus = 'ok' | 'fail' | 'check';
+
+export interface RequirementCheck {
+  requirementId: string;
+  category: string;
+  description: string;
+  status: CheckStatus;
+  informative: boolean;
+  required: string;
+  companyValue: string | null;
+  note: string;
+  page: number | null;
+  excerpt: string;
+  deadline: string | null;
+}
+
+export interface LotVerdict {
+  lotId: string | null;
+  verdict: 'APT' | 'NOT_APT' | 'CHECK';
+  failCount: number;
+  checkCount: number;
+  checks: RequirementCheck[];
+}
+
+export interface EditalAnalysisDocument {
+  kind: string;
+  title: string;
+  url: string;
+  included: boolean;
+  reason: string | null;
+}
+
+export interface EditalAnalysisRecord {
+  id: string;
+  status: 'RUNNING' | 'COMPLETED' | 'FAILED';
+  partial: boolean;
+  documents: EditalAnalysisDocument[];
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EditalAnalysisView {
+  enabled: boolean;
+  disabledReason: string | null;
+  analysis: EditalAnalysisRecord | null;
+  lots: LotVerdict[];
+  profileChanged: boolean;
+  profileEmpty: boolean;
+}
+
+export interface ProfileRegistration {
+  council: 'CREA' | 'CAU';
+  number: string;
+  state: string;
+  validUntil: string | null;
+}
+
+export interface ProfileTechnician {
+  id: string;
+  name: string;
+  title: string;
+  registrationNumber: string;
+}
+
+export interface ProfileAttestation {
+  id: string;
+  service: string;
+  quantity: number;
+  unit: string;
+  contractor: string;
+  catNumber: string | null;
+  technicianId: string | null;
+  issuedAt: string | null;
+}
+
+export interface ProfileFinancial {
+  netWorthCents: number | null;
+  shareCapitalCents: number | null;
+  liquidityGeneral: number | null;
+  solvencyGeneral: number | null;
+  liquidityCurrent: number | null;
+  balanceSheetDate: string | null;
+}
+
+export interface CompanyProfile {
+  registrations: ProfileRegistration[];
+  technicians: ProfileTechnician[];
+  attestations: ProfileAttestation[];
+  financial: ProfileFinancial;
+}

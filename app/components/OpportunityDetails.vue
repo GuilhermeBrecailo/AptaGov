@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, watch } from 'vue';
 import OpportunityChecklist from './OpportunityChecklist.vue';
 import MarketSummary from './MarketSummary.vue';
+import EditalAnalysisPanel from './EditalAnalysisPanel.vue';
 import { deadlineInfo, formatDate as date, formatMoney as money, scoreTone } from '../utils/format';
 import type { CatalogOpportunity, ChecklistPatchInput, ChecklistItem, OpportunityMarketPayload } from '../types';
 
@@ -81,6 +82,7 @@ function scoreLabel(value: string): string {
         @quick-complete="emit('checklistComplete', $event)"
         @save-item="emit('checklistSave', $event.id, $event.patch)"
       />
+      <EditalAnalysisPanel :opportunity-id="item.id" :source-url="item.sourceUrl" />
       <div class="details-section"><span class="details-eyebrow">Sobre a contratação</span><p>{{ item.description || 'O edital não trouxe uma descrição complementar.' }}</p></div>
       <div class="details-section score-explanation"><span class="details-eyebrow">Por que apareceu</span><p class="score-explanation-copy">Score calculado por regras configuráveis da sua empresa.</p><div v-for="(value, key) in item.scoreBreakdown" :key="key" class="score-breakdown-row"><span>{{ scoreLabel(String(key)) }}</span><strong>{{ value }} pts</strong></div></div>
       <div class="details-actions"><button class="btn btn-outline" type="button" @click="emit('feedback', item.favorite ? null : 'FAVORITED')">{{ item.favorite ? 'Remover favorita' : 'Favoritar oportunidade' }}</button><button class="btn btn-ghost" type="button" @click="emit('feedback', item.notRelevant ? null : 'NOT_RELEVANT')">{{ item.notRelevant ? 'Mostrar novamente' : 'Não é relevante' }}</button></div>

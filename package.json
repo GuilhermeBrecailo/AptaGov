@@ -15,9 +15,11 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "backup": "tsx scripts/backup.ts",
     "e2e:real": "tsx scripts/e2e-real.ts",
+    "e2e:edital": "tsx scripts/e2e-edital.ts",
     "e2e:operational-real": "tsx scripts/e2e-operational-real.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.13.0",
     "better-sqlite3": "^11.10.0",
     "dotenv": "^16.5.0",
     "nuxt": "^4.0.0",
