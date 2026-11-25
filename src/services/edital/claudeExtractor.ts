@@ -1,4 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk';
+import { APIConnectionError, APIError } from '@anthropic-ai/sdk';
 import type { CompanyProfile } from '../../domain/companyProfile';
 import { editalExtractionJsonSchema, editalExtractionSchema, type EditalExtraction } from './extraction';
 
@@ -62,6 +63,26 @@ Em "matches": para cada exigência de atestado (capacidade técnica operacional 
 
 Não invente exigências nem valores que não estejam nos documentos.`;
 
+const TOO_LARGE_MESSAGE = 'Edital grande demais para análise automática — abra pelo link';
+const BUSY_MESSAGE = 'Serviço de IA ocupado agora. Tente novamente em alguns minutos.';
+const CONNECTION_MESSAGE = 'Não foi possível falar com o serviço de IA agora. Tente novamente em alguns minutos.';
+const API_FAILURE_MESSAGE = 'Falha no serviço de IA ao ler o edital. Tente novamente mais tarde.';
+// A 400 for an oversized prompt carries no stable error code, only this wording.
+const CONTEXT_PATTERN = /prompt is too long|too many tokens|context (window|length)|too large/iu;
+
+/** Maps SDK errors (spec decision 6) to messages the user can act on; the original text never reaches the UI. */
+function translateApiError(error: unknown): unknown {
+  // APIConnectionError extends APIError with no status, so it must be checked first.
+  if (error instanceof APIConnectionError) return new ExtractionFailedError(CONNECTION_MESSAGE, { cause: error });
+  if (!(error instanceof APIError)) return error;
+  const status = error.status;
+  if (status === 413 || (status === 400 && CONTEXT_PATTERN.test(`${error.apiMessage ?? ''} ${error.message}`))) {
+    return new ExtractionFailedError(TOO_LARGE_MESSAGE, { cause: error });
+  }
+  if (status === 429 || (status !== undefined && status >= 500)) return new ExtractionFailedError(BUSY_MESSAGE, { cause: error });
+  return new ExtractionFailedError(API_FAILURE_MESSAGE, { cause: error });
+}
+
 type ResponseBlock = { type: string; text?: string };
 
 function outputText(content: ResponseBlock[]): string {
@@ -94,25 +115,30 @@ export class ClaudeEditalExtractor implements EditalExtractor {
       source: { type: 'base64', media_type: 'application/pdf', data: document.data.toString('base64') }
     }));
 
-    const message = await this.client.beta.messages
-      .stream({
-        model: this.model,
-        max_tokens: MAX_TOKENS,
-        betas: [FALLBACK_BETA],
-        fallbacks: 'default',
-        thinking: { type: 'adaptive' },
-        output_config: { effort: 'high', format: { type: 'json_schema', schema: editalExtractionJsonSchema } },
-        messages: [
-          {
-            role: 'user',
-            content: [
-              ...documents,
-              { type: 'text', text: `Perfil técnico da empresa (JSON):\n${JSON.stringify(input.profile)}\n\n${INSTRUCTIONS}` }
-            ]
-          }
-        ]
-      })
-      .finalMessage();
+    let message;
+    try {
+      message = await this.client.beta.messages
+        .stream({
+          model: this.model,
+          max_tokens: MAX_TOKENS,
+          betas: [FALLBACK_BETA],
+          fallbacks: 'default',
+          thinking: { type: 'adaptive' },
+          output_config: { effort: 'high', format: { type: 'json_schema', schema: editalExtractionJsonSchema } },
+          messages: [
+            {
+              role: 'user',
+              content: [
+                ...documents,
+                { type: 'text', text: `Perfil técnico da empresa (JSON):\n${JSON.stringify(input.profile)}\n\n${INSTRUCTIONS}` }
+              ]
+            }
+          ]
+        })
+        .finalMessage();
+    } catch (error) {
+      throw translateApiError(error);
+    }
 
     if (message.stop_reason === 'refusal') {
       throw new ExtractionFailedError('A IA recusou analisar este edital — abra pelo link e confira manualmente');

@@ -1,4 +1,13 @@
 import type Anthropic from '@anthropic-ai/sdk';
+import {
+  APIConnectionError,
+  APIError,
+  BadRequestError,
+  ContentTooLargeError,
+  InternalServerError,
+  OverloadedError,
+  RateLimitError
+} from '@anthropic-ai/sdk';
 import { describe, expect, it } from 'vitest';
 import { emptyCompanyProfile } from '../../src/domain/companyProfile';
 import {
@@ -114,6 +123,18 @@ describe('editalExtractionSchema', () => {
     expect(editalExtractionSchema.safeParse(bad).success).toBe(false);
   });
 
+  it('rejects duplicate requirement ids', () => {
+    const bad = example();
+    bad.requirements[1]!.id = 'r1';
+    expect(editalExtractionSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it('rejects matches pointing to a requirement that does not exist', () => {
+    const bad = example();
+    bad.matches[0]!.requirementId = 'r9';
+    expect(editalExtractionSchema.safeParse(bad).success).toBe(false);
+  });
+
   it('json schema requires every property and forbids extras', () => {
     const schema = editalExtractionJsonSchema as {
       required: string[];
@@ -221,6 +242,54 @@ describe('ClaudeEditalExtractor', () => {
     const { client } = fakeClient(message({ stop_reason: stopReason, text }));
     const extractor = new ClaudeEditalExtractor({ client, model: MODEL });
     await expect(extractor.extract(input)).rejects.toBeInstanceOf(ExtractionFailedError);
+  });
+
+  it('duplicate requirement ids in the answer become ExtractionFailedError', async () => {
+    const bad = example();
+    bad.requirements[1]!.id = 'r1';
+    const { client } = fakeClient(message({ text: JSON.stringify(bad) }));
+    await expect(new ClaudeEditalExtractor({ client, model: MODEL }).extract(input)).rejects.toBeInstanceOf(ExtractionFailedError);
+  });
+
+  const TOO_LARGE = 'Edital grande demais para análise automática — abra pelo link';
+  const BUSY = 'Serviço de IA ocupado agora. Tente novamente em alguns minutos.';
+  const rejectingClient = (error: Error) =>
+    ({ beta: { messages: { stream: () => ({ finalMessage: async () => { throw error; } }) } } }) as unknown as Anthropic;
+  const apiError = (status: number, text: string) =>
+    APIError.generate(status, { type: 'error', error: { type: 'api_error', message: text } }, text, new Headers());
+
+  it.each([
+    ['413 ContentTooLargeError', () => apiError(413, 'request_too_large'), ContentTooLargeError, TOO_LARGE],
+    ['400 prompt too long', () => apiError(400, 'prompt is too long: 250000 tokens > 200000 maximum'), BadRequestError, TOO_LARGE],
+    ['429 RateLimitError', () => apiError(429, 'rate limited'), RateLimitError, BUSY],
+    ['529 OverloadedError', () => apiError(529, 'Overloaded'), OverloadedError, BUSY],
+    ['500 InternalServerError', () => apiError(500, 'internal'), InternalServerError, BUSY]
+  ])('translates SDK %s to ExtractionFailedError in Portuguese', async (_label, build, sdkClass, expected) => {
+    const sdkError = build();
+    expect(sdkError).toBeInstanceOf(sdkClass);
+    const client = rejectingClient(sdkError);
+    const promise = new ClaudeEditalExtractor({ client, model: MODEL }).extract(input);
+    await expect(promise).rejects.toBeInstanceOf(ExtractionFailedError);
+    await expect(promise).rejects.toThrow(expected);
+  });
+
+  it.each([
+    ['400 genérico', () => apiError(400, 'invalid model')],
+    ['401 autenticação', () => apiError(401, 'invalid x-api-key')],
+    ['conexão', () => new APIConnectionError({ message: 'Connection error.' })]
+  ])('translates other SDK errors (%s) to a generic Portuguese ExtractionFailedError without leaking the original text', async (_label, build) => {
+    const sdkError = build();
+    const client = rejectingClient(sdkError);
+    const error = await new ClaudeEditalExtractor({ client, model: MODEL }).extract(input).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ExtractionFailedError);
+    expect((error as Error).message).not.toContain(sdkError.message);
+    expect((error as Error).message).toMatch(/serviço de IA/i);
+    expect((error as Error).message).not.toBe(TOO_LARGE);
+  });
+
+  it('translates an SDK error thrown synchronously by stream()', async () => {
+    const client = { beta: { messages: { stream() { throw apiError(429, 'rate limited'); } } } } as unknown as Anthropic;
+    await expect(new ClaudeEditalExtractor({ client, model: MODEL }).extract(input)).rejects.toThrow(BUSY);
   });
 
   it('error messages are in Portuguese', async () => {

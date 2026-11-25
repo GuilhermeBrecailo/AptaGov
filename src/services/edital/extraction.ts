@@ -61,6 +61,18 @@ export const editalExtractionSchema = z.object({
       reason: z.string()
     })
   )
+}).superRefine((value, ctx) => {
+  // Duplicate ids would make one requirement's matches count for another.
+  const ids = new Set<string>();
+  value.requirements.forEach((req, index) => {
+    if (ids.has(req.id)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['requirements', index, 'id'], message: `Duplicate requirement id "${req.id}"` });
+    ids.add(req.id);
+  });
+  value.matches.forEach((item, index) => {
+    if (!ids.has(item.requirementId)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['matches', index, 'requirementId'], message: `Unknown requirement id "${item.requirementId}"` });
+    }
+  });
 });
 
 export type EditalExtraction = z.infer<typeof editalExtractionSchema>;
