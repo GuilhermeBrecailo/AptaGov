@@ -3,7 +3,7 @@ import type { AuthPayload } from '../types';
 
 defineProps<{
   auth?: AuthPayload | null;
-  active: 'panel' | 'agenda' | 'market' | 'configuration' | 'plan' | 'admin';
+  active: 'panel' | 'agenda' | 'market' | 'configuration' | 'plan' | 'admin' | 'profile';
   contentClass?: string;
 }>();
 

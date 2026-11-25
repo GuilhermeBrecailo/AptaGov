@@ -1012,6 +1012,37 @@ h1, h2, h3, h4 { font-weight: 700; letter-spacing: -.022em; }
 .preparation-header .section-kicker, .editor-head .section-kicker { display: none; }
 .app-heading h1, .list-heading h2, .radar-list-head h2 { margin-top: 0; }
 
+/* Análise do edital e perfil técnico */
+.edital-panel { margin: 18px 0; }
+.edital-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.edital-head h3 { margin: 0; font-size: 1rem; }
+.edital-muted { margin: 6px 0; color: var(--muted); font-size: .84rem; line-height: 1.5; }
+.edital-lot-select { margin: 10px 0; }
+.edital-verdict { display: flex; align-items: baseline; gap: 10px; margin: 10px 0; padding: 10px 14px; border-radius: var(--radius); background: var(--surface-2); }
+.edital-verdict strong { font-size: 1.05rem; }
+.edital-verdict span { color: var(--muted); font-size: .84rem; }
+.edital-verdict.verdict-apt { background: var(--success-soft); }
+.edital-verdict.verdict-apt strong { color: var(--success); }
+.edital-verdict.verdict-not_apt { background: var(--danger-soft); }
+.edital-verdict.verdict-not_apt strong { color: var(--danger); }
+.edital-verdict.verdict-check { background: var(--warn-soft); }
+.edital-verdict.verdict-check strong { color: var(--warn); }
+.edital-checks { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.edital-check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; padding: 12px 0; border-top: 1px solid var(--line); }
+.edital-check-body { min-width: 0; overflow-wrap: anywhere; }
+.edital-check-body strong { font-size: .9rem; }
+.edital-check-body dl { margin: 6px 0 0; }
+.edital-check-body dl > div { display: flex; gap: 8px; font-size: .84rem; }
+.edital-check-body dt { flex: none; min-width: 84px; color: var(--muted); }
+.edital-check-body dd { margin: 0; color: var(--ink-soft); }
+.edital-excerpt { margin: 6px 0; font-size: .82rem; color: var(--muted); }
+.edital-excerpt summary { cursor: pointer; }
+.edital-excerpt blockquote { margin: 6px 0 0; padding-left: 10px; border-left: 2px solid var(--line); color: var(--ink-soft); white-space: pre-line; }
+.profile-list { display: grid; gap: 12px; margin: 12px 0; }
+.profile-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 12px; align-items: end; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.profile-row .field { margin: 0; min-width: 0; }
+.profile-row .text-action { justify-self: start; color: var(--danger); }
+
 /* Topo só existe no celular; no desktop a sidebar já tem marca e conta */
 /* (a sidebar fixa mora dentro do topo, então o topo encolhe em vez de sumir) */
 @media (min-width: 1024px) {

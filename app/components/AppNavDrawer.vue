@@ -5,7 +5,7 @@ import type { AuthPayload } from '../types';
 
 defineProps<{
   auth?: AuthPayload | null;
-  active?: 'panel' | 'agenda' | 'market' | 'configuration' | 'plan' | 'admin';
+  active?: 'panel' | 'agenda' | 'market' | 'configuration' | 'plan' | 'admin' | 'profile';
 }>();
 
 const emit = defineEmits<{ logout: [] }>();
@@ -19,6 +19,7 @@ const icons = {
   market: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
   configuration: 'M4 7h10M18 7h2M4 17h4M12 17h8M16 5v4M10 15v4',
   plan: 'M3 7h18v12H3zM3 11h18',
+  profile: 'M9 3h6l1 2h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h3l1-2ZM8 12l2.5 2.5L16 9',
   admin: 'M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6l-8-3Z',
 } as const;
 
@@ -80,6 +81,10 @@ onBeforeUnmount(() => globalThis.removeEventListener('keydown', handleKeydown));
       <NuxtLink class="nav-drawer-link" to="/configuracao" exact-active-class="active">
         <svg class="nav-drawer-icon" viewBox="0 0 24 24" aria-hidden="true"><path :d="icons.configuration" /></svg>
         <strong>Configuração</strong>
+      </NuxtLink>
+      <NuxtLink class="nav-drawer-link" to="/perfil" exact-active-class="active">
+        <svg class="nav-drawer-icon" viewBox="0 0 24 24" aria-hidden="true"><path :d="icons.profile" /></svg>
+        <strong>Perfil técnico</strong>
       </NuxtLink>
       <NuxtLink class="nav-drawer-link" to="/plano" exact-active-class="active">
         <svg class="nav-drawer-icon" viewBox="0 0 24 24" aria-hidden="true"><path :d="icons.plan" /></svg>
