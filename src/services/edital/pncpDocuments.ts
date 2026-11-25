@@ -110,5 +110,7 @@ export function fitToBudget<T extends SelectedDocument & { bytes: number }>(
       throw new DocumentTooLargeError();
     }
   }
+  // Never hand the extractor an empty set (e.g. only a TR that is itself over the budget).
+  if (included.length === 0) throw new DocumentTooLargeError();
   return { included, partial: included.length < docs.length };
 }

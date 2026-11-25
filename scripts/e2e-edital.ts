@@ -4,7 +4,7 @@ import { loadEnv } from '../src/config/env';
 import { companyProfileSchema, emptyCompanyProfile, type CompanyProfile } from '../src/domain/companyProfile';
 import { fitToBudget, parsePncpId, PncpDocumentClient, selectDocuments } from '../src/services/edital/pncpDocuments';
 import { ClaudeEditalExtractor, estimateCostUsdMicros } from '../src/services/edital/claudeExtractor';
-import { compareRequirements } from '../src/services/edital/compareRequirements';
+import { compareRequirements, markPartial } from '../src/services/edital/compareRequirements';
 
 // Uso: npm run e2e:edital -- <pncp_id> [perfil.json] [--valor-estimado=<reais>]
 // --valor-estimado: valor estimado da contratacao em reais (ex.: 1250000.50), como a oportunidade no PNCP; sem ele, exigencias em percentual ficam para conferir.
@@ -53,6 +53,7 @@ try {
   if (supported.length === 0) fail('nenhum edital/termo de referência em PDF encontrado no PNCP.');
   const downloaded = await Promise.all(supported.map(async (doc) => ({ ...doc, data: await documents.download(doc.url) })));
   const { included, partial } = fitToBudget(downloaded.map((doc) => ({ ...doc, bytes: doc.data.length })));
+  if (included.length === 0) fail('nenhum documento cabe no limite de tamanho; a IA não foi chamada.');
   console.log(`Documentos: ${included.map((doc) => `${doc.kind} (${(doc.bytes / 1024).toFixed(0)} KB)`).join(', ')}${partial ? ' [parcial]' : ''}`);
 
   const extractor = new ClaudeEditalExtractor({ client: new Anthropic({ apiKey: env.anthropicApiKey }), model: env.editalAnalysisModel });
@@ -60,7 +61,8 @@ try {
     documents: included.map((doc) => ({ kind: doc.kind, title: doc.title, data: doc.data })),
     profile
   });
-  const verdicts = compareRequirements({ extraction: result.extraction, profile, opportunityEstimatedValueCents: estimatedValueCents, now: new Date() });
+  const compared = compareRequirements({ extraction: result.extraction, profile, opportunityEstimatedValueCents: estimatedValueCents, now: new Date() });
+  const verdicts = partial || supported.length < selected.length ? markPartial(compared) : compared;
 
   for (const lot of verdicts) {
     console.log(`\nLote ${lot.lotId ?? '(único)'}: ${lot.verdict} (${lot.failCount} falhas, ${lot.checkCount} a conferir)`);

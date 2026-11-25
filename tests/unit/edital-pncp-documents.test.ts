@@ -126,4 +126,9 @@ describe('fitToBudget', () => {
   it('lança DocumentTooLargeError quando só o edital já não cabe', () => {
     expect(() => fitToBudget([doc('EDITAL', 30 * MB)])).toThrow(DocumentTooLargeError);
   });
+
+  it('lança DocumentTooLargeError quando nada cabe, mesmo sem edital', () => {
+    expect(() => fitToBudget([doc('TERMO_REFERENCIA', 30 * MB)])).toThrow(DocumentTooLargeError);
+    expect(() => fitToBudget([])).toThrow(DocumentTooLargeError);
+  });
 });

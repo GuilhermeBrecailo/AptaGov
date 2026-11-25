@@ -11,7 +11,7 @@ import {
 } from '../../repositories/editalAnalysisRepository';
 import { OpportunityRepository } from '../../repositories/opportunityRepository';
 import { estimateCostUsdMicros, ExtractionFailedError, type EditalExtractor } from './claudeExtractor';
-import { compareRequirements, type LotVerdict } from './compareRequirements';
+import { compareRequirements, markPartial, type LotVerdict } from './compareRequirements';
 import {
   DocumentTooLargeError,
   fitToBudget,
@@ -179,11 +179,12 @@ export class EditalAnalysisService {
       try {
         budget = fitToBudget(downloaded);
       } catch (error) {
-        // Edital alone exceeds the budget: nothing is analyzed.
+        // Edital alone (or every document) exceeds the budget: nothing is analyzed.
         documents = entriesWith(new Set());
         throw error;
       }
       documents = entriesWith(new Set(budget.included.map((doc) => doc.url)));
+      if (budget.included.length === 0) throw new DocumentTooLargeError();
 
       const profile = this.profiles.find(record.organizationId);
       const result = await extractor.extract({
@@ -222,6 +223,7 @@ export class EditalAnalysisService {
         opportunityEstimatedValueCents: opportunity?.estimatedValueCents ?? 0,
         now
       });
+      if (analysis.partial) lots = markPartial(lots);
     }
 
     return {

@@ -22,10 +22,10 @@ const MB = 1024 * 1024;
 const PDF = Buffer.from('%PDF-1.4 conteúdo de teste');
 
 const DEFAULT_FILES: FileEntry[] = [
-  { sequencialDocumento: 1, tipoDocumentoNome: 'Edital', titulo: 'edital-v1.pdf', url: 'https://pncp.test/files/1' },
-  { sequencialDocumento: 2, tipoDocumentoNome: 'Termo de Referência', titulo: 'tr.pdf', url: 'https://pncp.test/files/2' },
-  { sequencialDocumento: 3, tipoDocumentoNome: 'Edital', titulo: 'edital-v2.pdf', url: 'https://pncp.test/files/3' },
-  { sequencialDocumento: 4, tipoDocumentoNome: 'Minuta do Contrato', titulo: 'minuta.pdf', url: 'https://pncp.test/files/4' }
+  { sequencialDocumento: 1, tipoDocumentoNome: 'Edital', titulo: 'edital-v1.pdf', url: 'https://pncp.gov.br/pncp-api/v1/files/1' },
+  { sequencialDocumento: 2, tipoDocumentoNome: 'Termo de Referência', titulo: 'tr.pdf', url: 'https://pncp.gov.br/pncp-api/v1/files/2' },
+  { sequencialDocumento: 3, tipoDocumentoNome: 'Edital', titulo: 'edital-v2.pdf', url: 'https://pncp.gov.br/pncp-api/v1/files/3' },
+  { sequencialDocumento: 4, tipoDocumentoNome: 'Minuta do Contrato', titulo: 'minuta.pdf', url: 'https://pncp.gov.br/pncp-api/v1/files/4' }
 ];
 
 const EXTRACTION: EditalExtraction = {
@@ -172,9 +172,9 @@ describe('EditalAnalysisService', () => {
     expect(record.error).toBeNull();
     expect(record.extraction).toEqual(EXTRACTION);
     expect(record.documents).toEqual([
-      { kind: 'EDITAL', title: 'edital-v2.pdf', url: 'https://pncp.test/files/3', included: true, reason: null },
-      { kind: 'TERMO_REFERENCIA', title: 'tr.pdf', url: 'https://pncp.test/files/2', included: true, reason: null },
-      { kind: 'EDITAL', title: 'edital-v1.pdf', url: 'https://pncp.test/files/1', included: false, reason: 'Versão anterior' }
+      { kind: 'EDITAL', title: 'edital-v2.pdf', url: 'https://pncp.gov.br/pncp-api/v1/files/3', included: true, reason: null },
+      { kind: 'TERMO_REFERENCIA', title: 'tr.pdf', url: 'https://pncp.gov.br/pncp-api/v1/files/2', included: true, reason: null },
+      { kind: 'EDITAL', title: 'edital-v1.pdf', url: 'https://pncp.gov.br/pncp-api/v1/files/1', included: false, reason: 'Versão anterior' }
     ]);
 
     const fake = extractor as FakeExtractor;
@@ -248,8 +248,8 @@ describe('EditalAnalysisService', () => {
 
   it('só ZIP termina FAILED com a mensagem de formato e não chama o extrator', async () => {
     const files: FileEntry[] = [
-      { sequencialDocumento: 1, tipoDocumentoNome: 'Edital', titulo: 'edital.zip', url: 'https://pncp.test/files/1' },
-      { sequencialDocumento: 2, tipoDocumentoNome: 'Termo de Referência', titulo: 'tr.zip', url: 'https://pncp.test/files/2' }
+      { sequencialDocumento: 1, tipoDocumentoNome: 'Edital', titulo: 'edital.zip', url: 'https://pncp.gov.br/pncp-api/v1/files/1' },
+      { sequencialDocumento: 2, tipoDocumentoNome: 'Termo de Referência', titulo: 'tr.zip', url: 'https://pncp.gov.br/pncp-api/v1/files/2' }
     ];
     const { service, repository, organizationId, opportunityId, extractor } = setup({ files });
 
@@ -259,16 +259,16 @@ describe('EditalAnalysisService', () => {
     const record = repository.latest(organizationId, opportunityId, NOW)!;
     expect(record.error).toBe('Edital em formato não suportado (ZIP/DOCX) — abra pelo link');
     expect(record.documents).toEqual([
-      { kind: 'EDITAL', title: 'edital.zip', url: 'https://pncp.test/files/1', included: false, reason: 'Formato não suportado' },
-      { kind: 'TERMO_REFERENCIA', title: 'tr.zip', url: 'https://pncp.test/files/2', included: false, reason: 'Formato não suportado' }
+      { kind: 'EDITAL', title: 'edital.zip', url: 'https://pncp.gov.br/pncp-api/v1/files/1', included: false, reason: 'Formato não suportado' },
+      { kind: 'TERMO_REFERENCIA', title: 'tr.zip', url: 'https://pncp.gov.br/pncp-api/v1/files/2', included: false, reason: 'Formato não suportado' }
     ]);
     expect((extractor as FakeExtractor).calls).toHaveLength(0);
   });
 
   it('TR em ZIP fica de fora e a análise é marcada parcial', async () => {
     const files: FileEntry[] = [
-      { sequencialDocumento: 1, tipoDocumentoNome: 'Edital', titulo: 'edital.pdf', url: 'https://pncp.test/files/1' },
-      { sequencialDocumento: 2, tipoDocumentoNome: 'Termo de Referência', titulo: 'tr.zip', url: 'https://pncp.test/files/2' }
+      { sequencialDocumento: 1, tipoDocumentoNome: 'Edital', titulo: 'edital.pdf', url: 'https://pncp.gov.br/pncp-api/v1/files/1' },
+      { sequencialDocumento: 2, tipoDocumentoNome: 'Termo de Referência', titulo: 'tr.zip', url: 'https://pncp.gov.br/pncp-api/v1/files/2' }
     ];
     disableScheduling();
     const { service, repository, organizationId, opportunityId } = setup({ files });
@@ -279,12 +279,44 @@ describe('EditalAnalysisService', () => {
     expect(done.status).toBe('COMPLETED');
     expect(done.partial).toBe(true);
     expect(done.documents[1]).toMatchObject({ kind: 'TERMO_REFERENCIA', included: false, reason: 'Formato não suportado' });
+
+    // O perfil atende a única exigência lida, mas sem o TR o veredito não pode ser Apto.
+    const view = service.view(organizationId, opportunityId);
+    expect(view.lots[0]!.verdict).toBe('CHECK');
+    expect(view.lots[0]!.checks.find((check) => check.requirementId === 'r1')!.status).toBe('ok');
+    expect(view.lots[0]!.checks.find((check) => check.description === 'Análise parcial: nem todos os documentos foram lidos'))
+      .toMatchObject({ status: 'check', informative: false });
+  });
+
+  it('documentos que não cabem no orçamento nunca chamam o extrator com zero documentos', async () => {
+    disableScheduling();
+    const big = Buffer.alloc(25 * MB);
+    PDF.copy(big);
+    const documents = {
+      list: async () => [{ sequential: 1, typeName: 'Termo de Referência', title: 'tr.pdf', url: 'https://pncp.gov.br/pncp-api/v1/files/1' }],
+      download: async () => big
+    } as unknown as PncpDocumentClient;
+    const base = setup();
+    const extractor = new FakeExtractor();
+    const service = new EditalAnalysisService({ db: base.db, env: loadEnv({
+      NODE_ENV: 'test',
+      ANTHROPIC_API_KEY: 'test-key',
+      EDITAL_ANALYSIS_ORGANIZATION_IDS: String(base.organizationId)
+    }), extractor, documents, now: () => NOW });
+    const record = service.start(base.organizationId, base.opportunityId);
+    await service.run(record.id);
+
+    const failed = base.repository.latest(base.organizationId, base.opportunityId, NOW)!;
+    expect(failed.status).toBe('FAILED');
+    expect(failed.error).toBe('Edital grande demais para análise automática — abra pelo link');
+    expect(failed.documents[0]).toMatchObject({ kind: 'TERMO_REFERENCIA', included: false, reason: 'Excede o limite de tamanho' });
+    expect(extractor.calls).toHaveLength(0);
   });
 
   it('TR que estoura o orçamento fica de fora e a análise é parcial', async () => {
     disableScheduling();
     const { service, repository, organizationId, opportunityId, extractor } = setup({
-      sizes: { 'https://pncp.test/files/3': 20 * MB, 'https://pncp.test/files/2': 5 * MB }
+      sizes: { 'https://pncp.gov.br/pncp-api/v1/files/3': 20 * MB, 'https://pncp.gov.br/pncp-api/v1/files/2': 5 * MB }
     });
     const record = service.start(organizationId, opportunityId);
     await service.run(record.id);
@@ -299,7 +331,7 @@ describe('EditalAnalysisService', () => {
   it('Edital sozinho acima do orçamento termina FAILED sem chamar o extrator', async () => {
     disableScheduling();
     const { service, repository, organizationId, opportunityId, extractor } = setup({
-      sizes: { 'https://pncp.test/files/3': 25 * MB }
+      sizes: { 'https://pncp.gov.br/pncp-api/v1/files/3': 25 * MB }
     });
     const record = service.start(organizationId, opportunityId);
     await service.run(record.id);
