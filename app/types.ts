@@ -361,10 +361,19 @@ export interface LotVerdict {
   checks: RequirementCheck[];
 }
 
+export interface EditalAnalysisDocument {
+  kind: string;
+  title: string;
+  url: string;
+  included: boolean;
+  reason: string | null;
+}
+
 export interface EditalAnalysisRecord {
   id: string;
   status: 'RUNNING' | 'COMPLETED' | 'FAILED';
   partial: boolean;
+  documents: EditalAnalysisDocument[];
   error: string | null;
   createdAt: string;
   updatedAt: string;

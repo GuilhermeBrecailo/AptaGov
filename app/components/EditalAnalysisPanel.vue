@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import type { CheckStatus, EditalAnalysisView, LotVerdict, RequirementCheck } from '../types';
+import type { CheckStatus, EditalAnalysisDocument, EditalAnalysisView, LotVerdict, RequirementCheck } from '../types';
+import { documentKindLabel, safeHttpsUrl } from '../viewModels/editalDocumentsViewModel';
 
 const props = defineProps<{ opportunityId: number; sourceUrl?: string }>();
 
@@ -27,6 +28,8 @@ const lot = computed<LotVerdict | null>(() => lots.value[lotIndex.value] ?? lots
 const checks = computed<RequirementCheck[]>(() =>
   [...(lot.value?.checks ?? [])].sort((a, b) => statusOrder[a.status] - statusOrder[b.status]));
 const busy = computed(() => starting.value || running.value);
+const documents = computed<EditalAnalysisDocument[]>(() => view.value?.analysis?.documents ?? []);
+const officialUrl = computed(() => safeHttpsUrl(props.sourceUrl));
 
 function getApiError(err: unknown, fallback: string) {
   if (err && typeof err === 'object' && 'data' in err) {
@@ -137,7 +140,7 @@ onBeforeUnmount(() => { clearTimer(); request += 1; });
 
     <div v-if="failed" class="form-error" role="alert">
       {{ view?.analysis?.error || 'Falha ao analisar o edital.' }}
-      <a v-if="sourceUrl" :href="sourceUrl" target="_blank" rel="noreferrer">Abrir na fonte oficial ↗</a>
+      <a v-if="officialUrl" :href="officialUrl" target="_blank" rel="noreferrer">Abrir na fonte oficial ↗</a>
     </div>
 
     <template v-if="view && !running">
@@ -153,7 +156,7 @@ onBeforeUnmount(() => { clearTimer(); request += 1; });
     </template>
 
     <template v-if="completed && lot">
-      <p v-if="view?.analysis?.partial" class="notice warning">Análise parcial: só o edital foi lido</p>
+      <p v-if="view?.analysis?.partial" class="notice warning">Análise parcial: nem todos os documentos foram lidos — veja a lista abaixo.</p>
 
       <label v-if="lots.length > 1" class="field edital-lot-select">
         <span>Lote</span>
@@ -200,5 +203,17 @@ onBeforeUnmount(() => { clearTimer(); request += 1; });
         </li>
       </ul>
     </template>
+
+    <details v-if="!running && (completed || failed) && documents.length" class="edital-documents" :open="view?.analysis?.partial || failed">
+      <summary>Documentos do edital</summary>
+      <ul>
+        <li v-for="(doc, index) in documents" :key="`${doc.url}-${index}`">
+          <span>{{ documentKindLabel(doc.kind) }} · </span>
+          <a v-if="safeHttpsUrl(doc.url)" :href="safeHttpsUrl(doc.url) ?? undefined" target="_blank" rel="noreferrer">{{ doc.title }} ↗</a>
+          <span v-else>{{ doc.title }}</span>
+          <small class="edital-muted"> — {{ doc.included ? 'Lido' : doc.reason || 'Não lido' }}</small>
+        </li>
+      </ul>
+    </details>
   </section>
 </template>
