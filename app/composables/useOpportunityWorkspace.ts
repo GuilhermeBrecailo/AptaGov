@@ -1,9 +1,14 @@
 import { watch, type Ref } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { getKanbanItems } from '../viewModels/operationalViewModels';
+import {
+  CATALOG_FILTER_QUERY_KEYS, DEFAULT_CATALOG_FILTERS, filtersFromQuery, filtersToQuery, removeFilterChip,
+  type CatalogFilterState,
+} from '../viewModels/catalogFiltersViewModel';
 import type { CatalogOpportunity, CatalogPage, ChecklistItem, ChecklistPatchInput, FilterConfig, KanbanState, SavedSearch, SyncSettings } from '../types';
 import { deadlineInfo } from '../utils/format';
 
+export type CatalogFacets = { modalities: string[]; disputeModes: string[]; cities: string[] };
 export type WorkspaceView = 'catalog' | 'kanban';
 export type WorkspaceStatus = { pause: { paused: boolean; reason: string | null }; opportunities: number; automaticSync: SyncSettings };
 
@@ -18,6 +23,7 @@ export function useOpportunityWorkspace(input: {
   refreshStatus: () => Promise<void>;
 }) {
   const route = useRoute();
+  const router = useRouter();
 
   const activeView = ref<WorkspaceView>(route.query.opportunity ? 'kanban' : 'catalog');
   const searchInput = ref('');
@@ -27,6 +33,7 @@ export function useOpportunityWorkspace(input: {
   const selectedRadarId = ref<number | undefined>();
   const sortInput = ref<'score' | 'deadline' | 'publication'>('score');
   const openDeadlineOnly = ref(false);
+  const catalogFilters = ref<CatalogFilterState>(filtersFromQuery(route.query));
   const page = ref(1);
   const busy = ref(false);
   const message = ref('');
@@ -62,6 +69,8 @@ export function useOpportunityWorkspace(input: {
       pageSize: activeView.value === 'kanban' ? 50 : 20,
       kanbanOnly: activeView.value === 'kanban',
       opportunity: route.query.opportunity,
+      // Filtros novos valem só para o catálogo; o kanban continua sem eles.
+      ...(activeView.value === 'catalog' ? filtersToQuery(catalogFilters.value) : {}),
     };
   });
 
@@ -69,6 +78,11 @@ export function useOpportunityWorkspace(input: {
     query,
     default: () => ({ data: [], total: 0, page: 1, pageSize: 20, totalPages: 1 }),
   });
+  const facetsRequest = useFetch<CatalogFacets>('/api/opportunities/facets', {
+    query: computed(() => ({ state: stateInput.value || undefined })),
+    default: () => ({ modalities: [], disputeModes: [], cities: [] }),
+  });
+  const facets = facetsRequest.data;
   const { data: catalog, pending: catalogLoading, refresh: refreshCatalog } = catalogRequest;
 
   const authorizedItems = computed(() => catalog.value?.data ?? []);
@@ -93,6 +107,33 @@ export function useOpportunityWorkspace(input: {
   watch(selected, (item) => {
     if (item?.inKanban) void loadChecklist(item.id);
   });
+
+  /** Espelha os filtros na URL sem criar histórico e preservando os demais parâmetros. */
+  async function syncFiltersToUrl() {
+    const preserved = Object.fromEntries(Object.entries(route.query).filter(([key]) => !CATALOG_FILTER_QUERY_KEYS.includes(key)));
+    await router.replace({ query: { ...preserved, ...filtersToQuery(catalogFilters.value) } });
+  }
+
+  async function setCatalogFilters(next: CatalogFilterState) {
+    catalogFilters.value = next;
+    page.value = 1;
+    await syncFiltersToUrl();
+  }
+
+  async function removeCatalogFilter(key: string) {
+    await setCatalogFilters(removeFilterChip(catalogFilters.value, key));
+  }
+
+  async function clearCatalogFilters() {
+    await setCatalogFilters({ ...DEFAULT_CATALOG_FILTERS });
+  }
+
+  /** Trocar o estado invalida a cidade escolhida, que pertence às facetas do estado anterior. */
+  async function applyStateFilter() {
+    if (stateInput.value && catalogFilters.value.city) catalogFilters.value = { ...catalogFilters.value, city: '' };
+    page.value = 1;
+    await syncFiltersToUrl();
+  }
 
   async function applySearch() {
     searchTerm.value = searchInput.value.trim();
@@ -201,6 +242,8 @@ export function useOpportunityWorkspace(input: {
     sortInput,
     openDeadlineOnly,
     page,
+    catalogFilters,
+    facets,
     busy,
     message,
     checklistByOpportunity,
@@ -213,6 +256,10 @@ export function useOpportunityWorkspace(input: {
     averageScore,
     closingSoonCount,
     applySearch,
+    setCatalogFilters,
+    removeCatalogFilter,
+    clearCatalogFilters,
+    applyStateFilter,
     selectRadar,
     selectView,
     addToKanban,

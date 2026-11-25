@@ -1067,6 +1067,19 @@ h1, h2, h3, h4 { font-weight: 700; letter-spacing: -.022em; }
 .filter-bar .filter-search:focus, .filter-bar select:focus { background: var(--surface); box-shadow: var(--focus); }
 .filter-check { display: inline-flex; align-items: center; gap: 6px; padding: 0 4px; color: var(--ink-soft); font-size: .875rem; white-space: nowrap; }
 .filter-check input { width: 16px; height: 16px; margin: 0; }
+.filter-bar .count-badge { margin-left: 2px; }
+.filter-panel { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; padding: 12px; border-bottom: .5px solid var(--line); background: var(--surface-2); }
+.filter-field { display: grid; align-content: start; gap: 4px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.filter-field > span, .filter-field > legend { padding: 0; color: var(--muted); font-size: .76rem; font-weight: 600; }
+.filter-field select, .filter-field input[type="text"], .filter-field input[type="date"] { min-height: 36px; padding: 6px 10px; border: 0; border-radius: 10px; background: var(--surface-3); color: var(--ink); font-size: .875rem; }
+.filter-field select:focus, .filter-field input:focus-visible { background: var(--surface); box-shadow: var(--focus); outline: 0; }
+.filter-options { max-height: 150px; overflow-y: auto; }
+.filter-options .filter-check { white-space: normal; }
+.filter-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 8px 12px; border-bottom: .5px solid var(--line); }
+.filter-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 10px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); font-size: .78rem; font-weight: 550; }
+.filter-chip button { display: grid; width: 20px; height: 20px; place-items: center; padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit; font-size: .95rem; line-height: 1; cursor: pointer; }
+.filter-chip button:hover { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.filter-chip button:focus-visible, .filter-bar .btn:focus-visible { box-shadow: var(--focus); outline: 0; }
 
 /* Linha do catálogo: aderência | título e órgão | valor e prazo | ações */
 .catalog-list .opportunity-row { grid-template-columns: 40px minmax(0, 1fr) 170px auto; gap: 16px; padding: 14px 16px; }

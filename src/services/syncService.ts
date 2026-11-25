@@ -135,6 +135,8 @@ export function mapPncpRecord(record: Record<string, unknown>, source: Opportuni
     state: firstString(unit?.ufSigla, unit?.uf, record.uf) ?? '',
     city: firstString(unit?.municipioNome, unit?.nomeMunicipio, record.municipioNome) ?? '',
     modality: firstString(record.modalidadeNome, record.modalidade) ?? '',
+    situation: firstString(record.situacaoCompraNome, record.situacaoCompraNomePncp) ?? null,
+    disputeMode: firstString(record.modoDisputaNome, record.modoDisputaNomePncp) ?? null,
     sourceUrl,
     publicationDate,
     biddingDeadline: deadline,

@@ -22,6 +22,8 @@ export interface OpportunityInput {
   state: string;
   city?: string;
   modality?: string;
+  situation?: string | null;
+  disputeMode?: string | null;
   sourceUrl: string;
   publicationDate: string;
   biddingDeadline?: string | null;
@@ -36,6 +38,8 @@ export interface Opportunity extends Omit<OpportunityInput, 'source' | 'sourceCo
   sourceLabel: string;
   city: string;
   modality: string;
+  situation: string | null;
+  disputeMode: string | null;
   kanbanState: KanbanState;
   score: number;
   scoreBreakdown: Record<string, number>;
