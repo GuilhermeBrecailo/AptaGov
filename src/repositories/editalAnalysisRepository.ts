@@ -81,12 +81,13 @@ export class EditalAnalysisRepository {
     return row ? toRecord(row) : undefined;
   }
 
+  /** Only a RUNNING row is updated, so a late result cannot resurrect an analysis already marked interrupted. */
   complete(id: string, data: CompleteAnalysisData, now: Date = new Date()): void {
     this.db.prepare(`
       UPDATE edital_analyses
       SET status = 'COMPLETED', profile_hash = ?, documents_json = ?, partial = ?, model = ?, input_tokens = ?,
           output_tokens = ?, cost_usd_micros = ?, extraction_json = ?, error = NULL, updated_at = ?
-      WHERE id = ?
+      WHERE id = ? AND status = 'RUNNING'
     `).run(
       data.profileHash,
       JSON.stringify(data.documents),
@@ -101,11 +102,12 @@ export class EditalAnalysisRepository {
     );
   }
 
+  /** Only a RUNNING row is updated (see `complete`). */
   fail(id: string, message: string, documents?: EditalAnalysisDocument[], now: Date = new Date()): void {
     this.db.prepare(`
       UPDATE edital_analyses
       SET status = 'FAILED', error = ?, documents_json = COALESCE(?, documents_json), updated_at = ?
-      WHERE id = ?
+      WHERE id = ? AND status = 'RUNNING'
     `).run(message, documents ? JSON.stringify(documents) : null, now.toISOString(), id);
   }
 

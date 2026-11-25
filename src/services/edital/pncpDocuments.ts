@@ -12,6 +12,14 @@ export class DocumentTooLargeError extends Error {
   }
 }
 
+/** Non-2xx answer from the PNCP API; `status` lets callers tell 4xx from 5xx. */
+export class PncpHttpError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = 'PncpHttpError';
+  }
+}
+
 export type PncpFile = { sequential: number; typeName: string; title: string; url: string };
 export type SelectedDocument = PncpFile & { kind: 'EDITAL' | 'TERMO_REFERENCIA'; supported: boolean };
 
@@ -67,7 +75,7 @@ export class PncpDocumentClient {
     if (!parsed) throw new Error('Identificador PNCP inválido.');
     const url = `${this.baseUrl}/orgaos/${parsed.cnpj}/compras/${parsed.year}/${parsed.sequential}/arquivos`;
     const response = await this.fetchImpl(url, { headers: { Accept: 'application/json' } });
-    if (!response.ok) throw new Error(`Não foi possível listar os documentos do PNCP (HTTP ${response.status}).`);
+    if (!response.ok) throw new PncpHttpError(`Não foi possível listar os documentos do PNCP (HTTP ${response.status}).`, response.status);
     const body: unknown = await response.json();
     if (!Array.isArray(body)) return [];
     return body.map((item: Record<string, unknown>) => ({

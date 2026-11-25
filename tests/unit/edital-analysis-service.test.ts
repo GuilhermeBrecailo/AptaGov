@@ -70,16 +70,16 @@ function profileWithNetWorth(netWorthCents: number): CompanyProfile {
   return profile;
 }
 
-function fakeFetch(files: FileEntry[], sizes: Record<string, number> = {}): typeof fetch {
-  return (async (input: string | URL | Request) => {
+function fakeFetch(files: FileEntry[], sizes: Record<string, number> = {}, listStatus = 200) {
+  return vi.fn(async (input: string | URL | Request) => {
     const url = String(input);
-    if (url.endsWith('/arquivos')) return new Response(JSON.stringify(files), { status: 200 });
+    if (url.endsWith('/arquivos')) return new Response(listStatus === 200 ? JSON.stringify(files) : 'erro', { status: listStatus });
     const size = sizes[url];
     if (size === undefined) return new Response(PDF, { status: 200 });
     const body = Buffer.alloc(size);
     PDF.copy(body);
     return new Response(body, { status: 200 });
-  }) as typeof fetch;
+  });
 }
 
 class FakeExtractor implements EditalExtractor {
@@ -104,6 +104,7 @@ function setup(options: {
   pncpId?: string;
   limit?: number;
   sizes?: Record<string, number>;
+  listStatus?: number;
 } = {}) {
   const db: Db = createTestDatabase();
   const organization = new OrganizationRepository(db).create('Construtora Teste');
@@ -126,15 +127,16 @@ function setup(options: {
   const extractor = options.extractor === undefined ? new FakeExtractor() : options.extractor;
   const profiles = new CompanyProfileRepository(db);
   profiles.save(organization.id, profileWithNetWorth(50_000_000));
+  const fetchMock = fakeFetch(options.files ?? DEFAULT_FILES, options.sizes, options.listStatus);
   const service = new EditalAnalysisService({
     db,
     env,
     extractor,
-    documents: new PncpDocumentClient(fakeFetch(options.files ?? DEFAULT_FILES, options.sizes)),
+    documents: new PncpDocumentClient(fetchMock as unknown as typeof fetch),
     now: () => NOW
   });
   const repository = new EditalAnalysisRepository(db);
-  return { db, organizationId: organization.id, opportunityId, service, repository, profiles, extractor };
+  return { db, organizationId: organization.id, opportunityId, service, repository, profiles, extractor, fetchMock };
 }
 
 async function waitForStatus(repository: EditalAnalysisRepository, orgId: number, oppId: number, status: string) {
@@ -193,22 +195,26 @@ describe('EditalAnalysisService', () => {
     const { service, organizationId, opportunityId } = setup({ allow: false });
     expect(service.availability(organizationId)).toEqual({ enabled: false, reason: 'Análise de edital não liberada para sua empresa' });
     expect(() => service.start(organizationId, opportunityId)).toThrowError(
-      expect.objectContaining({ statusCode: 403, message: 'Análise de edital não liberada para sua empresa' })
+      expect.objectContaining({ statusCode: 403, statusMessage: 'Análise de edital não liberada para sua empresa' })
     );
   });
 
   it('sem extrator (sem chave) responde 503', () => {
-    const { service, organizationId, opportunityId } = setup({ extractor: null });
+    const { db, service, organizationId, opportunityId, fetchMock } = setup({ extractor: null });
     expect(service.availability(organizationId)).toEqual({ enabled: false, reason: 'Configure ANTHROPIC_API_KEY para analisar editais' });
     expect(() => service.start(organizationId, opportunityId)).toThrowError(
-      expect.objectContaining({ statusCode: 503, message: 'Configure ANTHROPIC_API_KEY para analisar editais' })
+      expect.objectContaining({ statusCode: 503, statusMessage: 'Configure ANTHROPIC_API_KEY para analisar editais' })
     );
     expect(service.view(organizationId, opportunityId).enabled).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(db.prepare('SELECT COUNT(*) AS total FROM edital_analyses').get()).toEqual({ total: 0 });
   });
 
   it('oportunidade inexistente responde 404', () => {
     const { service, organizationId } = setup();
-    expect(() => service.start(organizationId, 999_999)).toThrowError(expect.objectContaining({ statusCode: 404 }));
+    expect(() => service.start(organizationId, 999_999)).toThrowError(
+      expect.objectContaining({ statusCode: 404, statusMessage: 'Oportunidade não encontrada' })
+    );
   });
 
   it('segunda chamada com RUNNING existente devolve o mesmo id e o extrator roda uma vez', async () => {
@@ -236,7 +242,7 @@ describe('EditalAnalysisService', () => {
     expect(repository.countThisMonth(organizationId, NOW)).toBe(30);
 
     expect(() => service.start(organizationId, opportunityId)).toThrowError(
-      expect.objectContaining({ statusCode: 429, message: 'Limite mensal de análises atingido' })
+      expect.objectContaining({ statusCode: 429, statusMessage: 'Limite mensal de análises atingido' })
     );
   });
 
@@ -322,6 +328,50 @@ describe('EditalAnalysisService', () => {
       status: 'FAILED',
       error: 'Edital não disponível no PNCP'
     });
+  });
+
+  it('PNCP respondendo 404 na listagem falha com "Edital não disponível no PNCP"', async () => {
+    disableScheduling();
+    const { service, repository, organizationId, opportunityId, extractor } = setup({ listStatus: 404 });
+    const record = service.start(organizationId, opportunityId);
+    await service.run(record.id);
+    expect(repository.latest(organizationId, opportunityId, NOW)).toMatchObject({
+      status: 'FAILED',
+      error: 'Edital não disponível no PNCP'
+    });
+    expect((extractor as FakeExtractor).calls).toHaveLength(0);
+  });
+
+  it('PNCP respondendo 503 na listagem grava a mensagem genérica', async () => {
+    disableScheduling();
+    vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+    const { service, repository, organizationId, opportunityId } = setup({ listStatus: 503 });
+    const record = service.start(organizationId, opportunityId);
+    await service.run(record.id);
+    expect(repository.latest(organizationId, opportunityId, NOW)).toMatchObject({
+      status: 'FAILED',
+      error: 'Falha ao analisar o edital. Tente novamente mais tarde.'
+    });
+  });
+
+  it('complete e fail tardios não ressuscitam análise já marcada como interrompida', () => {
+    const { repository, organizationId, opportunityId } = setup();
+    const record = repository.createRunning(organizationId, opportunityId, 'hash', new Date(NOW.getTime() - 16 * 60_000));
+    expect(repository.latest(organizationId, opportunityId, NOW)?.status).toBe('FAILED');
+
+    repository.complete(record.id, {
+      profileHash: 'hash',
+      documents: [],
+      partial: false,
+      model: 'claude-opus-5-5',
+      inputTokens: 1,
+      outputTokens: 1,
+      costUsdMicros: 1,
+      extraction: EXTRACTION
+    }, NOW);
+    repository.fail(record.id, 'outra mensagem', undefined, NOW);
+
+    expect(repository.findById(record.id)).toMatchObject({ status: 'FAILED', error: 'Análise interrompida', extraction: null });
   });
 
   it('RUNNING com updated_at de 16 min atrás vira FAILED "Análise interrompida" na leitura', () => {

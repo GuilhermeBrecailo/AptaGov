@@ -16,6 +16,7 @@ import {
   DocumentTooLargeError,
   fitToBudget,
   parsePncpId,
+  PncpHttpError,
   selectDocuments,
   UnsupportedDocumentError,
   type PncpDocumentClient,
@@ -88,18 +89,18 @@ export class EditalAnalysisService {
 
   start(organizationId: number, opportunityId: number): EditalAnalysisRecord {
     if (!this.env.editalAnalysisOrganizationIds.includes(organizationId)) {
-      throw createError({ statusCode: 403, message: NOT_ALLOWED });
+      throw createError({ statusCode: 403, statusMessage: NOT_ALLOWED, message: NOT_ALLOWED });
     }
-    if (!this.extractor) throw createError({ statusCode: 503, message: MISSING_KEY });
+    if (!this.extractor) throw createError({ statusCode: 503, statusMessage: MISSING_KEY, message: MISSING_KEY });
     if (!this.opportunities.findById(opportunityId)) {
-      throw createError({ statusCode: 404, message: 'Oportunidade não encontrada' });
+      throw createError({ statusCode: 404, statusMessage: 'Oportunidade não encontrada', message: 'Oportunidade não encontrada' });
     }
 
     const now = this.now();
     const latest = this.analyses.latest(organizationId, opportunityId, now);
     if (latest?.status === 'RUNNING') return latest;
     if (this.analyses.countThisMonth(organizationId, now) >= this.env.editalAnalysisMonthlyLimit) {
-      throw createError({ statusCode: 429, message: MONTHLY_LIMIT });
+      throw createError({ statusCode: 429, statusMessage: MONTHLY_LIMIT, message: MONTHLY_LIMIT });
     }
 
     const record = this.analyses.createRunning(organizationId, opportunityId, profileHash(this.profiles.find(organizationId)), now);
@@ -129,7 +130,18 @@ export class EditalAnalysisService {
         return;
       }
 
-      const { selected, superseded } = selectDocuments(await this.documents.list(opportunity.pncpId));
+      let files: PncpFile[];
+      try {
+        files = await this.documents.list(opportunity.pncpId);
+      } catch (error) {
+        // 4xx means the PNCP has no such purchase/files: retrying would only burn the monthly quota.
+        if (error instanceof PncpHttpError && error.status >= 400 && error.status < 500) {
+          this.analyses.fail(recordId, NOT_AVAILABLE, undefined, this.now());
+          return;
+        }
+        throw error;
+      }
+      const { selected, superseded } = selectDocuments(files);
       if (selected.length === 0) {
         this.analyses.fail(recordId, NOT_AVAILABLE, undefined, this.now());
         return;
