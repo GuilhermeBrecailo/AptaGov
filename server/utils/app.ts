@@ -7,9 +7,14 @@ import { isPlatformAdminEmail } from '../../src/auth/platformAdmin';
 import { SessionRepository } from '../../src/repositories/sessionRepository';
 import { createError, getCookie, type H3Event } from 'h3';
 import { SavedSearchService } from '../../src/services/savedSearchService';
+import Anthropic from '@anthropic-ai/sdk';
+import { ClaudeEditalExtractor } from '../../src/services/edital/claudeExtractor';
+import { EditalAnalysisService } from '../../src/services/edital/editalAnalysisService';
+import { PncpDocumentClient } from '../../src/services/edital/pncpDocuments';
 
 let runtime: WorkerRuntime | undefined;
 let database: SqliteDatabase | undefined;
+let editalAnalysisService: EditalAnalysisService | undefined;
 
 export const SESSION_COOKIE = 'radar_session';
 
@@ -32,6 +37,22 @@ export function getRuntime(): WorkerRuntime {
 export function getSavedSearchService(): SavedSearchService {
   const env = loadEnv();
   return new SavedSearchService(getAppDatabase(), env.billingPlans, { trialDays: env.billingTrialDays });
+}
+
+export function getEditalAnalysisService(): EditalAnalysisService {
+  if (!editalAnalysisService) {
+    const env = loadEnv();
+    const extractor = env.anthropicApiKey
+      ? new ClaudeEditalExtractor({ client: new Anthropic({ apiKey: env.anthropicApiKey }), model: env.editalAnalysisModel })
+      : null;
+    editalAnalysisService = new EditalAnalysisService({
+      db: getAppDatabase(),
+      env,
+      extractor,
+      documents: new PncpDocumentClient()
+    });
+  }
+  return editalAnalysisService;
 }
 
 export function requireAuth(event: H3Event) {
