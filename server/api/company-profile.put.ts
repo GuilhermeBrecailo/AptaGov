@@ -19,6 +19,11 @@ export function handleCompanyProfilePut(input: { db: SqliteDatabase; organizatio
     technicians: parsed.data.technicians.map((item) => ({ ...item, id: item.id ?? randomUUID() })),
     attestations: parsed.data.attestations.map((item) => ({ ...item, id: item.id ?? randomUUID() })),
   };
+  // Duplicate ids would let one attestation or technician stand in for another in the edital comparison.
+  const unique = (ids: string[]) => new Set(ids).size === ids.length;
+  if (!unique(profile.technicians.map((item) => item.id)) || !unique(profile.attestations.map((item) => item.id))) {
+    throw createError({ statusCode: 400, statusMessage: 'Perfil inválido' });
+  }
   return new CompanyProfileRepository(input.db).save(input.organizationId, profile);
 }
 

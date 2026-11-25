@@ -1,73 +1,16 @@
 <script setup lang="ts">
 import type { AuthPayload, CompanyProfile } from '../types';
+import { formToProfile, profileToForm, type ProfileForm } from '../viewModels/profileFormViewModel';
 
 const { data: auth, error: authError } = await useFetch<AuthPayload>('/api/auth/me');
 if (authError.value) await navigateTo('/login');
 
-type Form = {
-  registrations: CompanyProfile['registrations'];
-  technicians: CompanyProfile['technicians'];
-  attestations: CompanyProfile['attestations'];
-  // Valores monetários em reais na tela; convertidos para centavos ao salvar.
-  netWorth: number | null;
-  shareCapital: number | null;
-  liquidityGeneral: number | null;
-  solvencyGeneral: number | null;
-  liquidityCurrent: number | null;
-  balanceSheetDate: string | null;
-};
-
-const toReais = (cents: number | null) => (cents === null ? null : cents / 100);
-const toCents = (reais: number | null) => (reais === null ? null : Math.round(reais * 100));
-
-function toForm(profile: CompanyProfile): Form {
-  const { financial } = profile;
-  return {
-    registrations: profile.registrations.map((item) => ({ ...item })),
-    technicians: profile.technicians.map((item) => ({ ...item })),
-    attestations: profile.attestations.map((item) => ({ ...item })),
-    netWorth: toReais(financial.netWorthCents),
-    shareCapital: toReais(financial.shareCapitalCents),
-    liquidityGeneral: financial.liquidityGeneral,
-    solvencyGeneral: financial.solvencyGeneral,
-    liquidityCurrent: financial.liquidityCurrent,
-    balanceSheetDate: financial.balanceSheetDate,
-  };
-}
-
-function toProfile(form: Form): CompanyProfile {
-  return {
-    registrations: form.registrations.map((item) => ({ ...item, validUntil: item.validUntil || null })),
-    technicians: form.technicians.map((item) => ({ ...item })),
-    attestations: form.attestations.map((item) => ({
-      ...item,
-      catNumber: item.catNumber?.trim() || null,
-      technicianId: item.technicianId || null,
-      issuedAt: item.issuedAt || null,
-    })),
-    financial: {
-      netWorthCents: toCents(form.netWorth),
-      shareCapitalCents: toCents(form.shareCapital),
-      liquidityGeneral: form.liquidityGeneral,
-      solvencyGeneral: form.solvencyGeneral,
-      liquidityCurrent: form.liquidityCurrent,
-      balanceSheetDate: form.balanceSheetDate || null,
-    },
-  };
-}
-
 const { data: profile } = await useFetch<CompanyProfile>('/api/company-profile');
-const form = ref<Form | null>(profile.value ? toForm(profile.value) : null);
+// Campos numéricos ficam como texto até salvar, para não apagar o que está sendo digitado ("-", "1e").
+const form = ref<ProfileForm | null>(profile.value ? profileToForm(profile.value) : null);
 const saving = ref(false);
 const message = ref('');
 const errorMessage = ref('');
-
-function numberFrom(event: Event): number | null {
-  const raw = textFrom(event);
-  if (raw === '') return null;
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : null;
-}
 
 function textFrom(event: Event): string {
   return (event.target as { value: string }).value;
@@ -96,7 +39,7 @@ function removeTechnician(index: number) {
 
 function addAttestation() {
   form.value?.attestations.push({
-    id: newId(), service: '', quantity: 0, unit: '', contractor: '', catNumber: null, technicianId: null, issuedAt: null,
+    id: newId(), service: '', quantity: '', unit: '', contractor: '', catNumber: null, technicianId: null, issuedAt: null,
   });
 }
 
@@ -110,12 +53,17 @@ function getApiError(error: unknown, fallback: string) {
 
 async function save() {
   if (!form.value) return;
-  saving.value = true;
   message.value = '';
   errorMessage.value = '';
+  const converted = formToProfile(form.value);
+  if (!converted.ok) {
+    errorMessage.value = converted.error;
+    return;
+  }
+  saving.value = true;
   try {
-    const saved = await $fetch<CompanyProfile>('/api/company-profile', { method: 'PUT', body: toProfile(form.value) });
-    form.value = toForm(saved);
+    const saved = await $fetch<CompanyProfile>('/api/company-profile', { method: 'PUT', body: converted.profile });
+    form.value = profileToForm(saved);
     message.value = 'Perfil técnico salvo.';
   } catch (error) {
     errorMessage.value = getApiError(error, 'Não foi possível salvar o perfil técnico');
@@ -172,7 +120,7 @@ async function save() {
           <div v-for="(item, index) in form.attestations" :key="item.id" class="profile-row">
             <label class="field"><span>Serviço</span><input v-model="item.service" required placeholder="Pavimentação asfáltica"></label>
             <label class="field"><span>Quantidade</span>
-              <input :value="item.quantity" type="number" min="0" step="any" required @input="item.quantity = numberFrom($event) ?? 0">
+              <input v-model="item.quantity" type="text" inputmode="decimal" required>
             </label>
             <label class="field"><span>Unidade</span><input v-model="item.unit" required placeholder="m²"></label>
             <label class="field"><span>Contratante</span><input v-model="item.contractor"></label>
@@ -194,19 +142,19 @@ async function save() {
         <div class="list-heading"><h2>Dados financeiros</h2></div>
         <div class="configuration-grid">
           <label class="field"><span>Patrimônio líquido (R$)</span>
-            <input :value="form.netWorth ?? ''" type="number" step="0.01" @input="form.netWorth = numberFrom($event)">
+            <input v-model="form.netWorth" type="text" inputmode="decimal">
           </label>
           <label class="field"><span>Capital social (R$)</span>
-            <input :value="form.shareCapital ?? ''" type="number" min="0" step="0.01" @input="form.shareCapital = numberFrom($event)">
+            <input v-model="form.shareCapital" type="text" inputmode="decimal">
           </label>
           <label class="field"><span>Liquidez geral</span>
-            <input :value="form.liquidityGeneral ?? ''" type="number" min="0" step="0.01" @input="form.liquidityGeneral = numberFrom($event)">
+            <input v-model="form.liquidityGeneral" type="text" inputmode="decimal">
           </label>
           <label class="field"><span>Solvência geral</span>
-            <input :value="form.solvencyGeneral ?? ''" type="number" min="0" step="0.01" @input="form.solvencyGeneral = numberFrom($event)">
+            <input v-model="form.solvencyGeneral" type="text" inputmode="decimal">
           </label>
           <label class="field"><span>Liquidez corrente</span>
-            <input :value="form.liquidityCurrent ?? ''" type="number" min="0" step="0.01" @input="form.liquidityCurrent = numberFrom($event)">
+            <input v-model="form.liquidityCurrent" type="text" inputmode="decimal">
           </label>
           <label class="field"><span>Data do balanço</span><input v-model="form.balanceSheetDate" type="date"></label>
         </div>

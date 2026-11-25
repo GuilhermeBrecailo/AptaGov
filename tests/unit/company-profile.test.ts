@@ -54,6 +54,17 @@ describe('company profile', () => {
       .toThrowError(expect.objectContaining({ statusCode: 400, statusMessage: 'Perfil inválido' }));
   });
 
+  it.each([
+    ['atestados', { attestations: [{ id: 'dup', ...attestation }, { id: 'dup', ...attestation }] }],
+    ['responsáveis', { technicians: [{ id: 't', name: 'A', title: 'Eng', registrationNumber: '1' }, { id: 't', name: 'B', title: 'Eng', registrationNumber: '2' }] }]
+  ])('rejeita ids duplicados em %s com 400 "Perfil inválido"', (_label, overrides) => {
+    const db = createTestDatabase();
+    const id = org(db);
+    expect(() => handleCompanyProfilePut({ db, organizationId: id, body: { ...emptyCompanyProfile(), ...overrides } }))
+      .toThrowError(expect.objectContaining({ statusCode: 400, statusMessage: 'Perfil inválido' }));
+    expect(new CompanyProfileRepository(db).find(id)).toEqual(emptyCompanyProfile());
+  });
+
   it('accepts negative net worth', () => {
     const db = createTestDatabase();
     const id = org(db);
