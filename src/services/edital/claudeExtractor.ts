@@ -57,7 +57,7 @@ Para cada exigência:
 - "lot": identificador do lote a que se aplica (o mesmo usado em summary.lots) ou null quando vale para todos os lotes.
 - "id": identificador único e curto (ex.: "r1", "r2").
 
-No "summary": objeto, valor estimado em centavos, data/hora de abertura (ISO 8601), modalidade, regime de execução, critério de julgamento, se permite consórcio e a lista de lotes (vazia quando não houver divisão em lotes). Use null para o que o edital não informar.
+No "summary": objeto, valor estimado em centavos, data/hora de abertura (ISO 8601 com offset -03:00), modalidade, regime de execução, critério de julgamento, se permite consórcio e a lista de lotes (vazia quando não houver divisão em lotes). Extraia também o prazo para impugnação e o prazo para pedido de esclarecimentos ("challengeDeadline" e "clarificationDeadline": data/hora ISO 8601 com offset -03:00 (ex.: 2026-12-07T18:00:00-03:00) em "at" e a página do PDF em "page"); null quando o edital não fixar a data. Use null para o que o edital não informar.
 
 Em "matches": para cada exigência de atestado (capacidade técnica operacional ou profissional), liste os atestados do perfil ("attestations[].id") que comprovam o MESMO TIPO DE SERVIÇO, com "confidence" (high, medium ou low) e uma justificativa curta em "reason". Avalie apenas a equivalência do serviço; NUNCA julgue se a quantidade é suficiente. Não invente ids que não estejam no perfil.
 

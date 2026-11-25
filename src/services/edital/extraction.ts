@@ -19,6 +19,8 @@ const councils = ['CREA', 'CAU'] as const;
 const confidences = ['high', 'medium', 'low'] as const;
 
 const nullableNumber = z.number().finite().nullable();
+// Stored analyses predate these fields, so they default to null when absent.
+const extractedDeadline = z.object({ at: z.string(), page: nullableNumber }).nullable().default(null);
 
 export const editalExtractionSchema = z.object({
   summary: z.object({
@@ -29,6 +31,8 @@ export const editalExtractionSchema = z.object({
     executionRegime: z.string().nullable(),
     judgmentCriterion: z.string().nullable(),
     allowsConsortium: z.boolean().nullable(),
+    challengeDeadline: extractedDeadline,
+    clarificationDeadline: extractedDeadline,
     lots: z.array(z.object({ id: z.string(), object: z.string(), estimatedValueCents: nullableNumber }))
   }),
   requirements: z.array(
@@ -102,6 +106,9 @@ function object(properties: Record<string, JsonSchema>, description?: string): J
   };
 }
 
+const deadlineSchema = (description: string): JsonSchema =>
+  object({ at: { type: 'string', description }, page: nullable({ type: 'integer', description: 'PDF page where the deadline appears' }) });
+
 export const editalExtractionJsonSchema: JsonSchema = object({
   summary: object({
     object: str,
@@ -111,6 +118,8 @@ export const editalExtractionJsonSchema: JsonSchema = object({
     executionRegime: nullable(str),
     judgmentCriterion: nullable(str),
     allowsConsortium: nullable(bool),
+    challengeDeadline: nullable(deadlineSchema('ISO 8601 date-time limit to file challenges (impugnação) against the edital')),
+    clarificationDeadline: nullable(deadlineSchema('ISO 8601 date-time limit to request clarifications (esclarecimentos)')),
     lots: array(object({ id: str, object: str, estimatedValueCents: nullable(int) }))
   }),
   requirements: array(

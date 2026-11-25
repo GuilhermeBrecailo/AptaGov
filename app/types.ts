@@ -1,7 +1,7 @@
 export type KanbanState = 'NEW' | 'QUALIFIED' | 'CONTACTED' | 'IN_PROGRESS' | 'WON' | 'LOST' | 'DISCARDED';
 export type SourceId = 'PNCP' | 'OPEN_DATA' | 'BEC/SP';
 export type OpportunitySource = SourceId;
-export type ReminderType = 'BID_DEADLINE' | 'DOCUMENT_REVIEW' | 'FOLLOW_UP' | 'MEETING';
+export type ReminderType = 'BID_DEADLINE' | 'DOCUMENT_REVIEW' | 'FOLLOW_UP' | 'MEETING' | 'CHALLENGE_DEADLINE' | 'CLARIFICATION_DEADLINE';
 export type ReminderStatus = 'PENDING' | 'COMPLETED' | 'SKIPPED';
 export type OpportunityChangeType =
   | 'PROPOSAL_DEADLINE'
@@ -11,7 +11,7 @@ export type OpportunityChangeType =
   | 'SOURCE_UPDATE';
 export type ChecklistStatus = 'OPEN' | 'COMPLETED' | 'SKIPPED';
 export type ChecklistCategory = 'DOCUMENTS' | 'COMMERCIAL' | 'PROPOSAL' | 'SESSION' | 'REVIEW';
-export type AgendaVisualType = 'BID_DEADLINE' | 'MEETING' | 'DISPUTE' | 'RESULT' | 'MANUAL' | 'SOURCE_UPDATE';
+export type AgendaVisualType = 'BID_DEADLINE' | 'MEETING' | 'DISPUTE' | 'RESULT' | 'MANUAL' | 'SOURCE_UPDATE' | 'CHALLENGE_DEADLINE' | 'CLARIFICATION_DEADLINE';
 
 export interface CatalogOpportunity {
   id: number;
@@ -189,6 +189,8 @@ export interface OrganizationAlertPreferences {
   sessionOpening: boolean;
   disputeStart: boolean;
   changeAlerts: boolean;
+  challengeDeadline: boolean;
+  clarificationDeadline: boolean;
 }
 
 export interface OpportunityReminder {

@@ -4,6 +4,7 @@ import OpportunityChecklist from './OpportunityChecklist.vue';
 import MarketSummary from './MarketSummary.vue';
 import EditalAnalysisPanel from './EditalAnalysisPanel.vue';
 import { deadlineInfo, formatDate as date, formatMoney as money, scoreTone } from '../utils/format';
+import { platformFor } from '../utils/platform';
 import type { CatalogOpportunity, ChecklistPatchInput, ChecklistItem, OpportunityMarketPayload } from '../types';
 
 const props = defineProps<{
@@ -86,7 +87,8 @@ function scoreLabel(value: string): string {
       <div class="details-section"><span class="details-eyebrow">Sobre a contratação</span><p>{{ item.description || 'O edital não trouxe uma descrição complementar.' }}</p></div>
       <div class="details-section score-explanation"><span class="details-eyebrow">Por que apareceu</span><p class="score-explanation-copy">Score calculado por regras configuráveis da sua empresa.</p><div v-for="(value, key) in item.scoreBreakdown" :key="key" class="score-breakdown-row"><span>{{ scoreLabel(String(key)) }}</span><strong>{{ value }} pts</strong></div></div>
       <div class="details-actions"><button class="btn btn-outline" type="button" @click="emit('feedback', item.favorite ? null : 'FAVORITED')">{{ item.favorite ? 'Remover favorita' : 'Favoritar oportunidade' }}</button><button class="btn btn-ghost" type="button" @click="emit('feedback', item.notRelevant ? null : 'NOT_RELEVANT')">{{ item.notRelevant ? 'Mostrar novamente' : 'Não é relevante' }}</button></div>
-      <a class="btn btn-primary full-button" :href="item.sourceUrl" target="_blank" rel="noreferrer">Abrir na fonte oficial ↗</a>
+      <a v-if="platformFor(item.sourceUrl).href" class="btn btn-primary full-button" :href="platformFor(item.sourceUrl).href!" target="_blank" rel="noreferrer">{{ platformFor(item.sourceUrl).label }}</a>
+      <span v-else class="details-eyebrow">{{ platformFor(item.sourceUrl).label }}</span>
     </aside>
   </div>
 </template>

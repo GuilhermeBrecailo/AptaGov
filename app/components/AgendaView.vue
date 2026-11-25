@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, reactive, watch } from 'vue';
+import { platformFor } from '../utils/platform';
 import type {
   AgendaEntryView,
   AgendaReminderDraft,
@@ -41,6 +42,8 @@ const preferenceDraft = reactive({
   sessionOpening: true,
   disputeStart: true,
   changeAlerts: true,
+  challengeDeadline: true,
+  clarificationDeadline: true,
 });
 
 watch(() => props.range, (range) => {
@@ -54,6 +57,8 @@ watch(() => props.preferences, (preferences) => {
   preferenceDraft.sessionOpening = preferences.sessionOpening;
   preferenceDraft.disputeStart = preferences.disputeStart;
   preferenceDraft.changeAlerts = preferences.changeAlerts;
+  preferenceDraft.challengeDeadline = preferences.challengeDeadline;
+  preferenceDraft.clarificationDeadline = preferences.clarificationDeadline;
 }, { immediate: true });
 
 watch(editorOpen, (open) => {
@@ -169,6 +174,8 @@ function visualLabel(type: AgendaVisualType): string {
     RESULT: 'Resultado oficial',
     MANUAL: 'Lembrete manual',
     SOURCE_UPDATE: 'Atualização da fonte',
+    CHALLENGE_DEADLINE: 'Prazo legal',
+    CLARIFICATION_DEADLINE: 'Prazo legal',
   }[type];
 }
 
@@ -179,6 +186,8 @@ function reminderTypeLabel(type: ReminderType | undefined): string {
     DOCUMENT_REVIEW: 'Revisão documental',
     FOLLOW_UP: 'Acompanhamento',
     MEETING: 'Sessão ou reunião',
+    CHALLENGE_DEADLINE: 'Prazo de impugnação',
+    CLARIFICATION_DEADLINE: 'Prazo de esclarecimentos',
   }[type];
 }
 
@@ -280,6 +289,8 @@ function toLocalInput(value: string): string {
       <label><input v-model="preferenceDraft.proposalDeadline" type="checkbox"> Prazos de proposta</label>
       <label><input v-model="preferenceDraft.sessionOpening" type="checkbox"> Aberturas de sessão</label>
       <label><input v-model="preferenceDraft.disputeStart" type="checkbox"> Inícios de disputa</label>
+      <label><input v-model="preferenceDraft.challengeDeadline" type="checkbox"> Prazos de impugnação</label>
+      <label><input v-model="preferenceDraft.clarificationDeadline" type="checkbox"> Prazos de esclarecimentos</label>
       <label><input v-model="preferenceDraft.changeAlerts" type="checkbox"> Mudanças na fonte oficial</label>
       <button class="btn btn-outline" type="button" :disabled="saving" @click="savePreferences">Salvar preferências</button>
     </section>
@@ -339,7 +350,8 @@ function toLocalInput(value: string): string {
         </div>
         <div class="agenda-event-source">
           <span>{{ entry.sourceLabel }}</span>
-          <a :href="entry.sourceUrl" target="_blank" rel="noreferrer">Abrir fonte oficial ↗</a>
+          <a v-if="platformFor(entry.sourceUrl).href" :href="platformFor(entry.sourceUrl).href!" target="_blank" rel="noreferrer">{{ platformFor(entry.sourceUrl).label }}</a>
+          <span v-else>{{ platformFor(entry.sourceUrl).label }}</span>
           <NuxtLink :to="{ path: '/', query: { opportunity: entry.opportunityId } }">Ver oportunidade</NuxtLink>
         </div>
         <div v-if="entry.kind === 'REMINDER'" class="agenda-event-actions">

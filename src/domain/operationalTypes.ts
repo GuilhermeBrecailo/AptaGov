@@ -1,6 +1,6 @@
 import type { OpportunitySource } from './types';
 
-export type ReminderType = 'BID_DEADLINE' | 'DOCUMENT_REVIEW' | 'FOLLOW_UP' | 'MEETING';
+export type ReminderType = 'BID_DEADLINE' | 'DOCUMENT_REVIEW' | 'FOLLOW_UP' | 'MEETING' | 'CHALLENGE_DEADLINE' | 'CLARIFICATION_DEADLINE';
 export type ReminderStatus = 'PENDING' | 'COMPLETED' | 'SKIPPED';
 export type OpportunityChangeType =
   | 'PROPOSAL_DEADLINE'
@@ -30,6 +30,8 @@ export interface OrganizationAlertPreferences {
   sessionOpening: boolean;
   disputeStart: boolean;
   changeAlerts: boolean;
+  challengeDeadline: boolean;
+  clarificationDeadline: boolean;
 }
 export type ChecklistStatus = 'OPEN' | 'COMPLETED' | 'SKIPPED';
 export type ChecklistCategory = 'DOCUMENTS' | 'COMMERCIAL' | 'PROPOSAL' | 'SESSION' | 'REVIEW';

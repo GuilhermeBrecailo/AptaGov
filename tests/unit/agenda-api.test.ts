@@ -60,6 +60,8 @@ describe('agenda e histórico operacional via handlers', () => {
       ['BID_DEADLINE', '2026-09-10T18:00:00.000Z'],
       ['MEETING', '2026-09-11T09:00:00.000Z'],
       ['FOLLOW_UP', '2026-09-11T09:30:00.000Z'],
+      ['CHALLENGE_DEADLINE', '2026-09-09T02:59:00.000Z'],
+      ['CLARIFICATION_DEADLINE', '2026-09-09T02:59:00.000Z'],
     ]);
 
     const changed = await syncRecords([{ ...base, biddingDeadline: '2026-09-12T18:00:00.000Z' }], repository);
@@ -218,6 +220,8 @@ describe('agenda e histórico operacional via handlers', () => {
         sessionOpening: false,
         disputeStart: false,
         changeAlerts: false,
+        challengeDeadline: false,
+        clarificationDeadline: false,
       },
     })).toMatchObject({
       proposalDeadline: true,
