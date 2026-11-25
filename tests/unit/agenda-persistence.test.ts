@@ -35,6 +35,8 @@ describe('persistência de agenda operacional', () => {
       sessionOpening: true,
       disputeStart: true,
       changeAlerts: true,
+      challengeDeadline: true,
+      clarificationDeadline: true,
     });
     expect(repository.save(organization.id, {
       proposalDeadline: true,
@@ -47,6 +49,8 @@ describe('persistência de agenda operacional', () => {
       sessionOpening: false,
       disputeStart: false,
       changeAlerts: false,
+      challengeDeadline: true,
+      clarificationDeadline: true,
     });
   });
 

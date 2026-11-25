@@ -50,6 +50,8 @@ const allPreferences: OrganizationAlertPreferences = {
   sessionOpening: true,
   disputeStart: true,
   changeAlerts: true,
+  challengeDeadline: true,
+  clarificationDeadline: true,
 };
 
 describe('view models da operacao', () => {
@@ -87,6 +89,18 @@ describe('view models da operacao', () => {
       ...allPreferences,
       disputeStart: false,
     })).toBe(true);
+  });
+
+  it('respeita preferencias dos prazos legais de impugnacao e esclarecimentos', () => {
+    expect(getReminderVisualType('CHALLENGE_DEADLINE', null)).toBe('CHALLENGE_DEADLINE');
+    expect(getReminderVisualType('CLARIFICATION_DEADLINE', null)).toBe('CLARIFICATION_DEADLINE');
+    expect(getReminderVisualType('CHALLENGE_DEADLINE', 42)).toBe('MANUAL');
+    const challenge = agendaEntry({ kind: 'REMINDER', visualType: 'CHALLENGE_DEADLINE' });
+    const clarification = agendaEntry({ kind: 'REMINDER', visualType: 'CLARIFICATION_DEADLINE' });
+    expect(shouldShowAgendaEntry(challenge, { ...allPreferences, challengeDeadline: false })).toBe(false);
+    expect(shouldShowAgendaEntry(challenge, { ...allPreferences, clarificationDeadline: false })).toBe(true);
+    expect(shouldShowAgendaEntry(clarification, { ...allPreferences, clarificationDeadline: false })).toBe(false);
+    expect(shouldShowAgendaEntry(clarification, { ...allPreferences, challengeDeadline: false })).toBe(true);
   });
 
   it('mantem favorito e lembrete fora do kanban sem remover item real do kanban', () => {

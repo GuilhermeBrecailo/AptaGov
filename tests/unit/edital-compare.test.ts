@@ -41,6 +41,8 @@ function extraction(
       executionRegime: null,
       judgmentCriterion: null,
       allowsConsortium: null,
+      challengeDeadline: null,
+      clarificationDeadline: null,
       lots: options.lots ?? []
     },
     requirements,

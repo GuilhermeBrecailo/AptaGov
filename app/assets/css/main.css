@@ -706,6 +706,7 @@ input, textarea, select, progress { accent-color: var(--accent); }
 .agenda-event::before { position: absolute; inset: 14px auto 14px 0; width: 4px; border-radius: 0 4px 4px 0; background: var(--event-color); content: ''; }
 .agenda-event.type-bid-deadline { --event-color: var(--danger); }
 .agenda-event.type-meeting { --event-color: var(--info); }
+.agenda-event.type-challenge-deadline, .agenda-event.type-clarification-deadline { --event-color: var(--warn); }
 .agenda-event.type-dispute { --event-color: var(--violet); }
 .agenda-event.type-result { --event-color: var(--accent); }
 .agenda-event.type-manual { --event-color: var(--ink-soft); }

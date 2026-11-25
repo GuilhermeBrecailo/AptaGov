@@ -29,6 +29,8 @@ function example(): EditalExtraction {
       executionRegime: 'Empreitada por preço unitário',
       judgmentCriterion: 'Menor preço',
       allowsConsortium: false,
+      challengeDeadline: null,
+      clarificationDeadline: null,
       lots: [{ id: '1', object: 'Lote único', estimatedValueCents: 150_000_000 }]
     },
     requirements: [

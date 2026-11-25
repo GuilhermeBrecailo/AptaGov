@@ -69,7 +69,7 @@ describe('detecção de mudanças oficiais', () => {
       { type: 'PROPOSAL_DEADLINE' },
     ]);
     expect(new Set(new OpportunityReminderRepository(db).listForOpportunity(organization.id, opportunityId)
-      .map((reminder) => reminder.type))).toEqual(new Set(['BID_DEADLINE', 'MEETING', 'FOLLOW_UP']));
+      .map((reminder) => reminder.type))).toEqual(new Set(['BID_DEADLINE', 'MEETING', 'FOLLOW_UP', 'CHALLENGE_DEADLINE', 'CLARIFICATION_DEADLINE']));
     expect(new NotificationRepository(db).list(organization.id)).toMatchObject([
       { eventKey: expect.stringMatching(`^opportunity-change:${organization.id}:${opportunityId}:`) },
     ]);

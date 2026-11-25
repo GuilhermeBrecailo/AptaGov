@@ -10,7 +10,9 @@ import {
   type EditalAnalysisRecord
 } from '../../repositories/editalAnalysisRepository';
 import { OpportunityRepository } from '../../repositories/opportunityRepository';
+import { AgendaService } from '../agendaService';
 import { estimateCostUsdMicros, ExtractionFailedError, type EditalExtractor } from './claudeExtractor';
+import type { EditalExtraction } from './extraction';
 import { compareRequirements, markPartial, type LotVerdict } from './compareRequirements';
 import {
   DocumentTooLargeError,
@@ -72,6 +74,7 @@ export class EditalAnalysisService {
   private readonly analyses: EditalAnalysisRepository;
   private readonly profiles: CompanyProfileRepository;
   private readonly opportunities: OpportunityRepository;
+  private readonly agenda: AgendaService;
 
   constructor(deps: EditalAnalysisServiceDeps) {
     this.env = deps.env;
@@ -81,6 +84,7 @@ export class EditalAnalysisService {
     this.analyses = new EditalAnalysisRepository(deps.db);
     this.profiles = new CompanyProfileRepository(deps.db);
     this.opportunities = new OpportunityRepository(deps.db);
+    this.agenda = new AgendaService(deps.db);
   }
 
   availability(organizationId: number): { enabled: boolean; reason: string | null } {
@@ -213,6 +217,7 @@ export class EditalAnalysisService {
         costUsdMicros: estimateCostUsdMicros(result.model, result.inputTokens, result.outputTokens),
         extraction: result.extraction
       }, this.now());
+      this.applyAgendaDeadlines(record.organizationId, record.opportunityId, result.extraction);
     } catch (error) {
       this.recordFailure(recordId, error, documents);
     }
@@ -245,6 +250,18 @@ export class EditalAnalysisService {
       profileChanged: analysis !== null && analysis.profileHash !== currentHash,
       profileEmpty: currentHash === profileHash(emptyCompanyProfile())
     };
+  }
+
+  /** The Agenda is a side effect: a failure here is logged and never fails the analysis. */
+  private applyAgendaDeadlines(organizationId: number, opportunityId: number, extraction: EditalExtraction): void {
+    try {
+      this.agenda.applyEditalDeadlines(organizationId, opportunityId, {
+        challenge: extraction.summary.challengeDeadline,
+        clarification: extraction.summary.clarificationDeadline
+      });
+    } catch (error) {
+      logger.error({ opportunityId, error: redactLogData(error) }, 'Could not apply edital deadlines to the agenda');
+    }
   }
 
   private recordFailure(recordId: string, error: unknown, documents: EditalAnalysisDocument[] | undefined): void {

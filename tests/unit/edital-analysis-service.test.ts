@@ -8,6 +8,7 @@ import { EditalAnalysisRepository } from '../../src/repositories/editalAnalysisR
 import { OpportunityRepository } from '../../src/repositories/opportunityRepository';
 import { OrganizationRepository } from '../../src/repositories/organizationRepository';
 import { ExtractionFailedError, estimateCostUsdMicros, type EditalExtractor, type ExtractionResult } from '../../src/services/edital/claudeExtractor';
+import { AgendaService } from '../../src/services/agendaService';
 import { EditalAnalysisService } from '../../src/services/edital/editalAnalysisService';
 import type { EditalExtraction } from '../../src/services/edital/extraction';
 import { PncpDocumentClient } from '../../src/services/edital/pncpDocuments';
@@ -37,6 +38,8 @@ const EXTRACTION: EditalExtraction = {
     executionRegime: null,
     judgmentCriterion: null,
     allowsConsortium: null,
+    challengeDeadline: null,
+    clarificationDeadline: null,
     lots: []
   },
   requirements: [
@@ -189,6 +192,30 @@ describe('EditalAnalysisService', () => {
     expect(view.lots[0]!.verdict).toBe('APT');
     expect(view.profileChanged).toBe(false);
     expect(view.profileEmpty).toBe(false);
+  });
+
+  it('run concluído aplica os prazos do edital na Agenda; falha da Agenda não derruba a análise', async () => {
+    disableScheduling();
+    const withDeadlines: EditalExtraction = {
+      ...EXTRACTION,
+      summary: { ...EXTRACTION.summary, challengeDeadline: { at: '2026-12-01T12:00:00.000Z', page: 7 }, clarificationDeadline: null }
+    };
+    const extractor = new FakeExtractor(async () => ({ extraction: withDeadlines, model: 'claude-opus-5-5', inputTokens: 1, outputTokens: 1 }));
+    const { service, repository, organizationId, opportunityId } = setup({ extractor });
+
+    const spy = vi.spyOn(AgendaService.prototype, 'applyEditalDeadlines');
+    const first = service.start(organizationId, opportunityId);
+    await service.run(first.id);
+    expect(repository.latest(organizationId, opportunityId, NOW)?.status).toBe('COMPLETED');
+    expect(spy).toHaveBeenCalledWith(organizationId, opportunityId, {
+      challenge: { at: '2026-12-01T12:00:00.000Z', page: 7 },
+      clarification: null
+    });
+
+    spy.mockImplementation(() => { throw new Error('agenda quebrou'); });
+    const second = service.start(organizationId, opportunityId);
+    await service.run(second.id);
+    expect(repository.latest(organizationId, opportunityId, NOW)?.status).toBe('COMPLETED');
   });
 
   it('organização fora da allowlist recebe 403', () => {

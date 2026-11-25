@@ -44,6 +44,8 @@ export function shouldShowAgendaEntry(
   if (entry.visualType === 'BID_DEADLINE') return preferences.proposalDeadline;
   if (entry.visualType === 'MEETING') return preferences.sessionOpening;
   if (entry.visualType === 'DISPUTE') return preferences.disputeStart;
+  if (entry.visualType === 'CHALLENGE_DEADLINE') return preferences.challengeDeadline;
+  if (entry.visualType === 'CLARIFICATION_DEADLINE') return preferences.clarificationDeadline;
   if (entry.visualType === 'RESULT' || entry.visualType === 'SOURCE_UPDATE') return preferences.changeAlerts;
   return true;
 }
@@ -53,6 +55,8 @@ export function getReminderVisualType(type: ReminderType, createdByUserId: numbe
   if (type === 'BID_DEADLINE') return 'BID_DEADLINE';
   if (type === 'MEETING') return 'MEETING';
   if (type === 'FOLLOW_UP') return 'DISPUTE';
+  if (type === 'CHALLENGE_DEADLINE') return 'CHALLENGE_DEADLINE';
+  if (type === 'CLARIFICATION_DEADLINE') return 'CLARIFICATION_DEADLINE';
   return 'MANUAL';
 }
 
