@@ -13,6 +13,8 @@ type OpportunityRow = {
   state: string;
   city: string;
   modality: string;
+  situation: string | null;
+  dispute_mode: string | null;
   source_url: string;
   publication_date: string;
   bidding_deadline: string | null;
@@ -47,7 +49,19 @@ export interface CatalogQuery {
   radarFilters?: FilterConfig;
   openDeadlineOnly?: boolean;
   sort?: 'score' | 'deadline' | 'publication';
+  situationFilter?: SituationFilter;
+  modalities?: string[];
+  city?: string;
+  disputeModes?: string[];
+  publishedFrom?: string;
+  publishedTo?: string;
+  deadlineFrom?: string;
+  deadlineTo?: string;
 }
+
+export type SituationFilter = 'open' | 'suspended' | 'cancelled' | 'all';
+
+const CLOSED_SITUATIONS = ['suspensa', 'revogada', 'anulada', 'deserta', 'fracassada', 'encerrada'];
 
 export interface CatalogOpportunity extends Opportunity {
   inKanban: boolean;
@@ -65,10 +79,12 @@ export interface CatalogPage {
 
 export class OpportunityRepository {
   private readonly hasSourceCodeColumn: boolean;
+  private readonly hasSituationColumns: boolean;
 
   constructor(private readonly db: SqliteDatabase) {
-    this.hasSourceCodeColumn = (this.db.prepare('PRAGMA table_info(opportunities)').all() as Array<{ name: string }>)
-      .some((column) => column.name === 'source_code');
+    const columns = (this.db.prepare('PRAGMA table_info(opportunities)').all() as Array<{ name: string }>).map((column) => column.name);
+    this.hasSourceCodeColumn = columns.includes('source_code');
+    this.hasSituationColumns = columns.includes('situation') && columns.includes('dispute_mode');
   }
 
   count(): number {
@@ -132,6 +148,7 @@ export class OpportunityRepository {
     if (query.hideNotRelevant !== false && query.feedback !== 'not_relevant') conditions.push("(feedback.status IS NULL OR feedback.status != 'NOT_RELEVANT')");
     addRadarFilters(conditions, params, query.radarFilters);
     if (query.openDeadlineOnly) conditions.push("o.bidding_deadline IS NOT NULL AND julianday(o.bidding_deadline) > julianday('now')");
+    this.addCatalogFilters(conditions, params, query);
     const where = conditions.join(' AND ');
     const from = `FROM opportunities o
       LEFT JOIN organization_opportunities oo ON oo.opportunity_id = o.id AND oo.organization_id = ?
@@ -162,6 +179,39 @@ export class OpportunityRepository {
       pageSize,
       totalPages: Math.max(1, Math.ceil(total / pageSize)),
     };
+  }
+
+  private addCatalogFilters(conditions: string[], params: Array<string | number>, query: CatalogQuery): void {
+    // Padrão do repositório é 'all'; o padrão 'open' é aplicado explicitamente pelo handler da API de catálogo.
+    const situation = query.situationFilter ?? 'all';
+    if (this.hasSituationColumns) {
+      if (situation === 'open') {
+        conditions.push(`(o.situation IS NULL OR TRIM(o.situation) = '' OR lower(TRIM(o.situation)) NOT IN (${CLOSED_SITUATIONS.map(() => '?').join(', ')}))`);
+        params.push(...CLOSED_SITUATIONS);
+      } else if (situation === 'suspended') {
+        conditions.push("lower(TRIM(o.situation)) = 'suspensa'");
+      } else if (situation === 'cancelled') {
+        conditions.push("lower(TRIM(o.situation)) IN ('revogada', 'anulada')");
+      }
+      const disputeModes = query.disputeModes?.filter(Boolean) ?? [];
+      if (disputeModes.length > 0) {
+        conditions.push(`TRIM(o.dispute_mode) IN (${disputeModes.map(() => '?').join(', ')})`);
+        params.push(...disputeModes);
+      }
+    }
+    const modalities = query.modalities?.filter(Boolean) ?? [];
+    if (modalities.length > 0) {
+      conditions.push(`TRIM(o.modality) IN (${modalities.map(() => '?').join(', ')})`);
+      params.push(...modalities);
+    }
+    if (query.city) {
+      conditions.push('TRIM(o.city) = ? COLLATE NOCASE');
+      params.push(query.city);
+    }
+    if (query.publishedFrom) { conditions.push('substr(o.publication_date, 1, 10) >= ?'); params.push(query.publishedFrom); }
+    if (query.publishedTo) { conditions.push('substr(o.publication_date, 1, 10) <= ?'); params.push(query.publishedTo); }
+    if (query.deadlineFrom) { conditions.push('substr(o.bidding_deadline, 1, 10) >= ?'); params.push(query.deadlineFrom); }
+    if (query.deadlineTo) { conditions.push('substr(o.bidding_deadline, 1, 10) <= ?'); params.push(query.deadlineTo); }
   }
 
   addToKanban(organizationId: number, opportunityId: number): void {
@@ -273,24 +323,38 @@ export class OpportunityRepository {
       sourceCode,
       city: input.city ?? '',
       modality: input.modality ?? '',
+      situation: input.situation ?? null,
+      disputeMode: input.disputeMode ?? null,
       biddingDeadline: input.biddingDeadline ?? null,
       rawJson: JSON.stringify(input.raw ?? {}),
       now,
     };
     const result = this.db.prepare(this.hasSourceCodeColumn ? `
       INSERT INTO opportunities (
-        pncp_id, source, source_code, title, description, organization, state, city, modality, source_url,
+        pncp_id, source, source_code, title, description, organization, state, city, modality${this.situationColumns()}, source_url,
         publication_date, bidding_deadline, estimated_value_cents, raw_json, created_at, updated_at
-      ) VALUES (@pncpId, @source, @sourceCode, @title, @description, @organization, @state, @city, @modality, @sourceUrl,
+      ) VALUES (@pncpId, @source, @sourceCode, @title, @description, @organization, @state, @city, @modality${this.situationValues()}, @sourceUrl,
         @publicationDate, @biddingDeadline, @estimatedValueCents, @rawJson, @now, @now)
     ` : `
       INSERT INTO opportunities (
-        pncp_id, source, title, description, organization, state, city, modality, source_url,
+        pncp_id, source, title, description, organization, state, city, modality${this.situationColumns()}, source_url,
         publication_date, bidding_deadline, estimated_value_cents, raw_json, created_at, updated_at
-      ) VALUES (@pncpId, @source, @title, @description, @organization, @state, @city, @modality, @sourceUrl,
+      ) VALUES (@pncpId, @source, @title, @description, @organization, @state, @city, @modality${this.situationValues()}, @sourceUrl,
         @publicationDate, @biddingDeadline, @estimatedValueCents, @rawJson, @now, @now)
     `).run(values);
     return Number(result.lastInsertRowid);
+  }
+
+  private situationColumns(): string {
+    return this.hasSituationColumns ? ', situation, dispute_mode' : '';
+  }
+
+  private situationValues(): string {
+    return this.hasSituationColumns ? ', @situation, @disputeMode' : '';
+  }
+
+  private situationAssignments(): string {
+    return this.hasSituationColumns ? ', situation = @situation, dispute_mode = @disputeMode' : '';
   }
 
   upsert(input: OpportunityInput): { id: number; created: boolean; previous?: Opportunity; current: Opportunity } {
@@ -309,19 +373,21 @@ export class OpportunityRepository {
         sourceCode,
         city: input.city ?? '',
         modality: input.modality ?? '',
+        situation: input.situation ?? null,
+        disputeMode: input.disputeMode ?? null,
         biddingDeadline: input.biddingDeadline ?? null,
         rawJson: JSON.stringify(input.raw ?? {}),
         now,
       };
       this.db.prepare(this.hasSourceCodeColumn ? `
         UPDATE opportunities SET title = @title, description = @description, organization = @organization,
-          source = @source, source_code = @sourceCode, state = @state, city = @city, modality = @modality, source_url = @sourceUrl,
+          source = @source, source_code = @sourceCode, state = @state, city = @city, modality = @modality${this.situationAssignments()}, source_url = @sourceUrl,
           publication_date = @publicationDate, bidding_deadline = @biddingDeadline,
           estimated_value_cents = @estimatedValueCents, raw_json = @rawJson, updated_at = @now
         WHERE pncp_id = @pncpId
       ` : `
         UPDATE opportunities SET title = @title, description = @description, organization = @organization,
-          source = @source, state = @state, city = @city, modality = @modality, source_url = @sourceUrl,
+          source = @source, state = @state, city = @city, modality = @modality${this.situationAssignments()}, source_url = @sourceUrl,
           publication_date = @publicationDate, bidding_deadline = @biddingDeadline,
           estimated_value_cents = @estimatedValueCents, raw_json = @rawJson, updated_at = @now
         WHERE pncp_id = @pncpId
@@ -400,7 +466,7 @@ function addRadarFilters(conditions: string[], params: Array<string | number>, f
   }
   const catalogModalities = filters.modalities.filter((modality) => !/^\d+$/.test(modality));
   if (catalogModalities.length > 0) {
-    conditions.push(`o.modality IN (${catalogModalities.map(() => '?').join(', ')})`);
+    conditions.push(`TRIM(o.modality) IN (${catalogModalities.map(() => '?').join(', ')})`);
     params.push(...catalogModalities);
   }
   if (filters.keywords.length > 0) {
@@ -437,6 +503,8 @@ function mapRow(row: OpportunityRow): Opportunity {
     state: row.state,
     city: row.city,
     modality: row.modality,
+    situation: row.situation ?? null,
+    disputeMode: row.dispute_mode ?? null,
     sourceUrl: row.source_url,
     publicationDate: row.publication_date,
     biddingDeadline: row.bidding_deadline,

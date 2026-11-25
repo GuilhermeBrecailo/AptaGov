@@ -1,5 +1,5 @@
 import { createError, defineEventHandler, getQuery } from 'h3';
-import type { CatalogQuery, OpportunityRepository } from '../../src/repositories/opportunityRepository';
+import type { CatalogQuery, OpportunityRepository, SituationFilter } from '../../src/repositories/opportunityRepository';
 import { getRuntime, getSavedSearchService, requireActiveBilling } from '../utils/app';
 
 export function handleOpportunitiesGet(input: {
@@ -17,6 +17,7 @@ export function handleOpportunitiesGet(input: {
       page: 1,
       pageSize: 1,
       authorizedOnly: true,
+      situationFilter: 'all',
       hideNotRelevant: false,
       sort: stringValue(query.sort) as 'score' | 'deadline' | 'publication' | undefined,
     });
@@ -35,6 +36,14 @@ export function handleOpportunitiesGet(input: {
     radarFilters: input.radarFilters,
     openDeadlineOnly: stringValue(query.openDeadlineOnly) === 'true',
     sort: stringValue(query.sort) as 'score' | 'deadline' | 'publication' | undefined,
+    situationFilter: situationValue(query),
+    modalities: listValue(query.modalities),
+    city: stringValue(query.city),
+    disputeModes: listValue(query.disputeModes),
+    publishedFrom: dateValue(query.publishedFrom),
+    publishedTo: dateValue(query.publishedTo),
+    deadlineFrom: dateValue(query.deadlineFrom),
+    deadlineTo: dateValue(query.deadlineTo),
   });
 }
 
@@ -62,6 +71,25 @@ function stringValue(value: unknown): string | undefined {
 function numberValue(value: unknown): number | undefined {
   const parsed = Number(value);
   return value !== undefined && Number.isFinite(parsed) ? parsed : undefined;
+}
+
+export function situationValue(query: Record<string, unknown>): SituationFilter {
+  const text = stringValue(query.situation);
+  if (text === 'open' || text === 'suspended' || text === 'cancelled' || text === 'all') return text;
+  // Kanban e listas de feedback mostram o que a organização já acompanha, sem esconder encerradas.
+  if (text === undefined && (stringValue(query.kanbanOnly) === 'true' || stringValue(query.feedback))) return 'all';
+  return 'open';
+}
+
+function listValue(value: unknown): string[] | undefined {
+  const text = Array.isArray(value) ? value.filter((item) => typeof item === 'string').join(',') : stringValue(value);
+  const items = text?.split(',').map((item) => item.trim()).filter(Boolean);
+  return items && items.length > 0 ? items : undefined;
+}
+
+function dateValue(value: unknown): string | undefined {
+  const text = stringValue(value);
+  return text && /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : undefined;
 }
 
 function integerValue(value: unknown): number | undefined {

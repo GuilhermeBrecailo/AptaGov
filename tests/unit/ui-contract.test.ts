@@ -17,6 +17,7 @@ describe('contrato visual do SaaS', () => {
 
     expect(home).toContain('Licitações');
     expect(home).toContain('Meu kanban');
+    for (const text of ['Mais filtros', 'Limpar filtros', 'Tipo de disputa', 'Publicação de', 'Prazo até', 'router.replace']) expect(home).toContain(text);
     expect(home).toContain('OpportunityCatalog');
     expect(configuration).toContain('Notificações');
     expect(configuration).toContain('Ativar alertas por e-mail');
