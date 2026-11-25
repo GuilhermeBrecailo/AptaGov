@@ -24,6 +24,7 @@ export class UntrustedDocumentUrlError extends Error {
 export const MAX_DOCUMENT_BYTES = 24 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 60_000;
 const PNCP_HOST = 'pncp.gov.br';
+const MAX_REDIRECTS = 3;
 
 /** Non-2xx answer from the PNCP API; `status` lets callers tell 4xx from 5xx. */
 export class PncpHttpError extends Error {
@@ -111,16 +112,53 @@ export class PncpDocumentClient {
   }
 
   async download(url: string): Promise<Buffer> {
-    if (!isPncpFileUrl(url)) throw new UntrustedDocumentUrlError();
-    const response = await this.fetchImpl(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
-    if (!response.ok) throw new Error(`Não foi possível baixar o documento do PNCP (HTTP ${response.status}).`);
-    const declared = Number(response.headers.get('content-length'));
-    if (Number.isFinite(declared) && declared > MAX_DOCUMENT_BYTES) throw new DocumentTooLargeError();
+    const signal = AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS);
+    let current = url;
+    for (let hop = 0; ; hop += 1) {
+      if (!isPncpFileUrl(current)) throw new UntrustedDocumentUrlError();
+      // Redirects are followed by hand so every hop is re-validated against the PNCP host.
+      const response = await this.fetchImpl(current, { signal, redirect: 'manual' });
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get('location');
+        if (!location || hop >= MAX_REDIRECTS) throw new UntrustedDocumentUrlError();
+        try {
+          current = new URL(location, current).toString();
+        } catch {
+          throw new UntrustedDocumentUrlError();
+        }
+        continue;
+      }
+      if (!response.ok) throw new Error(`Não foi possível baixar o documento do PNCP (HTTP ${response.status}).`);
+      const declared = Number(response.headers.get('content-length'));
+      if (Number.isFinite(declared) && declared > MAX_DOCUMENT_BYTES) throw new DocumentTooLargeError();
+      const bytes = await readCapped(response);
+      if (bytes.subarray(0, 4).toString('latin1') !== '%PDF') throw new UnsupportedDocumentError();
+      return bytes;
+    }
+  }
+}
+
+/** Reads the body incrementally, aborting as soon as it exceeds the cap (content-length may be absent or false). */
+async function readCapped(response: Response): Promise<Buffer> {
+  if (!response.body) {
     const bytes = Buffer.from(await response.arrayBuffer());
     if (bytes.length > MAX_DOCUMENT_BYTES) throw new DocumentTooLargeError();
-    if (bytes.subarray(0, 4).toString('latin1') !== '%PDF') throw new UnsupportedDocumentError();
     return bytes;
   }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > MAX_DOCUMENT_BYTES) {
+      await reader.cancel().catch(() => undefined);
+      throw new DocumentTooLargeError();
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks, total);
 }
 
 function isPncpFileUrl(value: string): boolean {

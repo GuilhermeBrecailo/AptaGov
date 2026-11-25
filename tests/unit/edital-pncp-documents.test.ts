@@ -172,6 +172,51 @@ describe('PncpDocumentClient', () => {
     expect(await client.download(PNCP_FILE).then(() => false, (error: unknown) => error instanceof DocumentTooLargeError)).toBe(true);
   });
 
+  it('para de ler o corpo sem content-length assim que passa de 24 MB', async () => {
+    let pulled = 0;
+    const chunk = new Uint8Array(MB);
+    chunk.set([0x25, 0x50, 0x44, 0x46]);
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1;
+        if (pulled > 100) controller.close();
+        else controller.enqueue(chunk);
+      }
+    });
+    const client = new PncpDocumentClient((async () => new Response(stream)) as unknown as typeof fetch);
+    expect(await client.download(PNCP_FILE).then(() => false, (error: unknown) => error instanceof DocumentTooLargeError)).toBe(true);
+    expect(pulled).toBeLessThan(40);
+  });
+
+  it('não segue redirect para outro host (nem chama fetch com ele)', async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 302, headers: { location: 'http://169.254.169.254/latest/meta-data' } }));
+    const client = new PncpDocumentClient(fetchImpl as unknown as typeof fetch);
+    await expect(client.download(PNCP_FILE)).rejects.toBeInstanceOf(UntrustedDocumentUrlError);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl.mock.calls.some((call) => String((call as unknown[])[0]).includes('169.254.169.254'))).toBe(false);
+  });
+
+  it('segue redirect para outro caminho em pncp.gov.br (relativo ou absoluto)', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      if (calls.length === 1) return new Response(null, { status: 302, headers: { location: '/outro/caminho.pdf' } });
+      if (calls.length === 2) return new Response(null, { status: 301, headers: { location: 'https://pncp.gov.br/final.pdf' } });
+      return new Response(Buffer.from('%PDF-1.7 ok'));
+    }) as unknown as typeof fetch;
+    const bytes = await new PncpDocumentClient(fetchImpl).download(PNCP_FILE);
+    expect(bytes.subarray(0, 4).toString()).toBe('%PDF');
+    expect(calls.map((call) => call.url)).toEqual([PNCP_FILE, 'https://pncp.gov.br/outro/caminho.pdf', 'https://pncp.gov.br/final.pdf']);
+    expect(calls.every((call) => call.init?.redirect === 'manual')).toBe(true);
+  });
+
+  it('rejeita mais de 3 redirects', async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 302, headers: { location: 'https://pncp.gov.br/loop' } }));
+    const client = new PncpDocumentClient(fetchImpl as unknown as typeof fetch);
+    await expect(client.download(PNCP_FILE)).rejects.toBeInstanceOf(UntrustedDocumentUrlError);
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
+  });
+
   it.each([
     'http://pncp.gov.br/pncp-api/v1/arquivo/1',
     'https://pncp.gov.br.evil.example/arquivo/1',
