@@ -87,6 +87,7 @@ function scoreLabel(value: string): string {
       <div class="details-section"><span class="details-eyebrow">Sobre a contratação</span><p>{{ item.description || 'O edital não trouxe uma descrição complementar.' }}</p></div>
       <div class="details-section score-explanation"><span class="details-eyebrow">Por que apareceu</span><p class="score-explanation-copy">Score calculado por regras configuráveis da sua empresa.</p><div v-for="(value, key) in item.scoreBreakdown" :key="key" class="score-breakdown-row"><span>{{ scoreLabel(String(key)) }}</span><strong>{{ value }} pts</strong></div></div>
       <div class="details-actions"><button class="btn btn-outline" type="button" @click="emit('feedback', item.favorite ? null : 'FAVORITED')">{{ item.favorite ? 'Remover favorita' : 'Favoritar oportunidade' }}</button><button class="btn btn-ghost" type="button" @click="emit('feedback', item.notRelevant ? null : 'NOT_RELEVANT')">{{ item.notRelevant ? 'Mostrar novamente' : 'Não é relevante' }}</button></div>
+      <NuxtLink class="btn btn-outline full-button" :to="`/licitacoes/${item.id}`">Ver página completa</NuxtLink>
       <a v-if="platformFor(item.sourceUrl).href" class="btn btn-primary full-button" :href="platformFor(item.sourceUrl).href!" target="_blank" rel="noreferrer">{{ platformFor(item.sourceUrl).label }}</a>
       <span v-else class="details-eyebrow">{{ platformFor(item.sourceUrl).label }}</span>
     </aside>

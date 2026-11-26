@@ -11,10 +11,13 @@ import Anthropic from '@anthropic-ai/sdk';
 import { ClaudeEditalExtractor } from '../../src/services/edital/claudeExtractor';
 import { EditalAnalysisService } from '../../src/services/edital/editalAnalysisService';
 import { PncpDocumentClient } from '../../src/services/edital/pncpDocuments';
+import { OpportunityDetailService } from '../../src/services/opportunityDetail/opportunityDetailService';
+import { PncpDetailClient } from '../../src/services/opportunityDetail/pncpDetailClient';
 
 let runtime: WorkerRuntime | undefined;
 let database: SqliteDatabase | undefined;
 let editalAnalysisService: EditalAnalysisService | undefined;
+let opportunityDetailService: OpportunityDetailService | undefined;
 
 export const SESSION_COOKIE = 'radar_session';
 
@@ -53,6 +56,11 @@ export function getEditalAnalysisService(): EditalAnalysisService {
     });
   }
   return editalAnalysisService;
+}
+
+export function getOpportunityDetailService(): OpportunityDetailService {
+  opportunityDetailService ??= new OpportunityDetailService({ db: getAppDatabase(), client: new PncpDetailClient() });
+  return opportunityDetailService;
 }
 
 export function requireAuth(event: H3Event) {

@@ -1278,3 +1278,26 @@ h1, h2, h3, h4 { font-weight: 700; letter-spacing: -.022em; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* Página completa da licitação */
+.detail-page .detail-back { margin-bottom: 12px; }
+.detail-content { display: grid; gap: 20px; max-width: 1100px; min-width: 0; }
+.detail-header h1 { margin: 10px 0 6px; font-size: 1.6rem; line-height: 1.25; }
+.detail-section { min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+.detail-section h2 { margin: 0 0 12px; font-size: 1.05rem; }
+.detail-section p { color: var(--ink-soft); font-size: .9rem; line-height: 1.65; white-space: pre-line; }
+.detail-state { display: grid; justify-items: start; gap: 8px; padding: 24px 0; }
+.detail-note { margin: 0 0 10px; color: var(--muted); font-size: .85rem; }
+.detail-total { margin: 0 0 10px; }
+.detail-total span { color: var(--muted); font-size: .85rem; }
+.detail-deadlines, .detail-files { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.detail-deadlines li, .detail-files li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; font-size: .9rem; }
+.detail-deadlines small, .detail-files small { color: var(--muted); }
+.detail-files li.superseded a { color: var(--muted); text-decoration: line-through; }
+.detail-table-scroll { max-width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.detail-table-scroll:focus-visible, .detail-page a:focus-visible, .detail-page button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.detail-table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: .85rem; font-variant-numeric: tabular-nums; }
+.detail-table caption { padding: 8px 12px; color: var(--muted); font-size: .8rem; text-align: left; }
+.detail-table th, .detail-table td { padding: 8px 12px; border-top: 1px solid var(--line); text-align: left; vertical-align: top; }
+.detail-table thead th { background: var(--surface-2); font-weight: 600; white-space: nowrap; }
+.detail-table .detail-description { min-width: 240px; }

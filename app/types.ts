@@ -430,3 +430,49 @@ export interface CompanyProfile {
   attestations: ProfileAttestation[];
   financial: ProfileFinancial;
 }
+
+export interface PncpItemView {
+  number: number;
+  description: string;
+  quantity: number | null;
+  unit: string | null;
+  unitValueCents: number | null;
+  totalValueCents: number | null;
+  confidential: boolean;
+  criterion: string | null;
+  benefit: string | null;
+  status: string | null;
+  kind: string | null;
+}
+
+export interface PncpFileView {
+  title: string;
+  typeName: string;
+  url: string;
+  publishedAt: string | null;
+  superseded: boolean;
+}
+
+export interface OpportunityDetailPncp {
+  source: 'pncp' | 'platform-only';
+  items: PncpItemView[];
+  itemsTotal: number;
+  truncated: boolean;
+  files: PncpFileView[];
+  fetchedAt: string | null;
+  stale: boolean;
+  unavailable: boolean;
+}
+
+export interface OpportunityDeadline {
+  key: 'publication' | 'proposalStart' | 'proposal' | 'opening' | 'challenge' | 'clarification';
+  label: string;
+  at: string | null;
+  note: string | null;
+}
+
+export interface OpportunityDetailResponse {
+  opportunity: CatalogOpportunity;
+  pncp: OpportunityDetailPncp;
+  deadlines: OpportunityDeadline[];
+}

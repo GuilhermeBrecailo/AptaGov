@@ -6,6 +6,7 @@ import { OrganizationRepository } from '../../src/repositories/organizationRepos
 import { normalizeOpportunitySnapshot } from '../../src/services/opportunityChangeService';
 import { AgendaService } from '../../src/services/agendaService';
 import { editalExtractionSchema } from '../../src/services/edital/extraction';
+import { businessDaysBefore } from '../../src/domain/legalDeadlines';
 
 const OPENING = '2026-09-11T09:00:00.000Z';
 
@@ -94,5 +95,40 @@ describe('editalExtractionSchema com prazos', () => {
     });
     expect(find('CHALLENGE_DEADLINE')!.dueAt).toBe('2026-12-07T21:00:00.000Z');
     expect(find('CLARIFICATION_DEADLINE')!.dueAt).toBe('2026-12-08T02:59:00.000Z');
+  });
+});
+
+describe('Agenda com o formato real do PNCP (só início e fim das propostas)', () => {
+  function setupPncp() {
+    const db = createTestDatabase();
+    const organizationId = new OrganizationRepository(db).create('Empresa PNCP').id;
+    const opportunities = new OpportunityRepository(db);
+    const opportunityId = opportunities.insert({
+      pncpId: 'pncp-real-1', title: 'Obra', description: '', organization: 'Prefeitura', state: 'SP',
+      sourceUrl: 'https://pncp.gov.br/pncp-real-1', publicationDate: '2026-11-23T15:06:41',
+      biddingDeadline: '2027-01-20T11:00:00', estimatedValueCents: 150_000,
+      raw: { dataAberturaProposta: '2026-11-24T09:00:00', dataEncerramentoProposta: '2027-01-20T11:00:00' },
+    });
+    opportunities.addToKanban(organizationId, opportunityId);
+    const agenda = new AgendaService(db);
+    const reminders = new OpportunityReminderRepository(db);
+    agenda.scheduleOfficialReminders(organizationId, undefined, normalizeOpportunitySnapshot(opportunities.findById(opportunityId)!));
+    const find = (type: string) => reminders.listForOpportunity(organizationId, opportunityId).find((item) => item.type === type);
+    return { agenda, organizationId, opportunityId, find };
+  }
+
+  it('estima impugnação pelo fim das propostas e não cria abertura de sessão a partir do início das propostas', () => {
+    const { find } = setupPncp();
+    expect(find('CHALLENGE_DEADLINE')!.dueAt).toBe(businessDaysBefore('2027-01-20T11:00:00', 3));
+    expect(find('MEETING')).toBeUndefined();
+  });
+
+  it('aceita a data do edital posterior ao início das propostas e anterior ao fim', () => {
+    const { agenda, organizationId, opportunityId, find } = setupPncp();
+    agenda.applyEditalDeadlines(organizationId, opportunityId, {
+      challenge: { at: '2027-01-14T20:00:00.000Z', page: 4 },
+      clarification: null,
+    });
+    expect(find('CHALLENGE_DEADLINE')).toMatchObject({ dueAt: '2027-01-14T20:00:00.000Z', note: 'Conforme edital, pág. 4' });
   });
 });
