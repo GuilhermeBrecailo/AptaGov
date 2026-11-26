@@ -34,7 +34,7 @@ export class PncpHttpError extends Error {
   }
 }
 
-export type PncpFile = { sequential: number; typeName: string; title: string; url: string };
+export type PncpFile = { sequential: number; typeName: string; title: string; url: string; publishedAt?: string | null };
 export type SelectedDocument = PncpFile & { kind: 'EDITAL' | 'TERMO_REFERENCIA'; supported: boolean };
 
 const PNCP_ID_PATTERN = /^(\d{14})-\d-(\d+)\/(\d{4})$/;
@@ -106,7 +106,8 @@ export class PncpDocumentClient {
         sequential: item.sequencialDocumento,
         typeName: String(item.tipoDocumentoNome ?? ''),
         title: String(item.titulo ?? ''),
-        url: item.url
+        url: item.url,
+        ...(typeof item.dataPublicacaoPncp === 'string' ? { publishedAt: item.dataPublicacaoPncp } : {})
       }];
     });
   }

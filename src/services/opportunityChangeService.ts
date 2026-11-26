@@ -59,7 +59,7 @@ export function normalizeOpportunitySnapshot(opportunity: Opportunity): Opportun
     opportunityId: opportunity.id,
     sourceCode: opportunity.source,
     biddingDeadline: normalizeText(opportunity.biddingDeadline),
-    sessionOpening: firstText(raw.dataAberturaSessaoPublica, raw.dataAberturaProposta, raw.dataAberturaSessao),
+    sessionOpening: sessionOpeningFromRaw(opportunity.raw),
     disputeStart: firstText(raw.dataInicioDisputa, raw.dataHoraInicioDisputa),
     closingResult: firstText(raw.situacaoCompra, raw.statusCompra, raw.resultado),
     title: opportunity.title.trim(),
@@ -69,6 +69,21 @@ export function normalizeOpportunitySnapshot(opportunity: Opportunity): Opportun
     officialFiles: normalizeOfficialFiles(raw.arquivos ?? raw.documentos ?? raw.anexos),
   };
   return { ...snapshot, fingerprint: hashCanonical(snapshot) };
+}
+
+/**
+ * Abertura da sessão quando a fonte oficial a publica explicitamente. `dataAberturaProposta` NÃO entra:
+ * no PNCP ela é o início do recebimento de propostas, não a sessão. Sem abertura explícita, quem precisa
+ * de uma base (prazos legais) usa o fim das propostas (`biddingDeadline`).
+ */
+export function sessionOpeningFromRaw(rawValue: unknown): string | null {
+  const raw = asRecord(rawValue);
+  return firstText(raw.dataAberturaSessaoPublica, raw.dataAberturaSessao);
+}
+
+/** Início do recebimento de propostas publicado pela fonte oficial. */
+export function proposalStartFromRaw(rawValue: unknown): string | null {
+  return firstText(asRecord(rawValue).dataAberturaProposta);
 }
 
 function detectChanges(previous: OpportunityOfficialSnapshot, current: OpportunityOfficialSnapshot): DetectedChange[] {
